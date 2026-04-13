@@ -133,13 +133,15 @@
         .then(throwCanisterError)
         .then((account) => account.account_number[0]);
       void triggerDropWaveAnimation();
-      const { requestId, delegationChain } =
-        await authorizationStore.authorize(accountNumber);
-      const result = DelegationResultSchema.encode(delegationChain);
+      const result = await authorizationStore.authorize(accountNumber);
+      if (result.kind === "native") {
+        window.location.assign(result.redirectUrl);
+        return;
+      }
       await $establishedChannelStore.send({
         jsonrpc: "2.0",
-        id: requestId,
-        result,
+        id: result.requestId,
+        result: DelegationResultSchema.encode(result.delegationChain),
       });
     } catch (error) {
       handleError(error);

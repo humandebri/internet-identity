@@ -51,6 +51,7 @@ mod conversions;
 mod delegation;
 mod http;
 mod ii_domain;
+mod native_authorization;
 
 mod openid;
 mod state;
@@ -348,6 +349,34 @@ async fn prepare_delegation(
          }| (user_key, expiration),
     )
     .unwrap_or_else(|err| trap(&format!("{err:?}")))
+}
+
+#[update]
+async fn prepare_native_authorization(
+    request: PrepareNativeAuthorizationRequest,
+) -> Result<PrepareNativeAuthorizationResponse, PrepareNativeAuthorizationError> {
+    native_authorization::prepare(request).await
+}
+
+#[query]
+fn get_native_authorization_request(
+    request_id: String,
+) -> Result<NativeAuthorizationRequest, GetNativeAuthorizationRequestError> {
+    native_authorization::get_request(&request_id)
+}
+
+#[update]
+async fn complete_native_authorization(
+    anchor_number: AnchorNumber,
+    request_id: String,
+    account_number: Option<AccountNumber>,
+) -> Result<CompleteNativeAuthorizationResponse, CompleteNativeAuthorizationError> {
+    native_authorization::complete(anchor_number, &request_id, account_number).await
+}
+
+#[query]
+fn fetch_native_delegation(request_id: String) -> FetchNativeDelegationResponse {
+    native_authorization::fetch(&request_id)
 }
 
 #[query]

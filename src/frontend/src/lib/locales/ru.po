@@ -743,6 +743,9 @@ msgstr "Переименовать этот аккаунт"
 msgid "Replace it anytime"
 msgstr "Замените его в любое время"
 
+msgid "Request expired"
+msgstr ""
+
 msgid "Requires unlocking before it can be reset."
 msgstr "Требует разблокировки перед сбросом."
 
@@ -939,6 +942,12 @@ msgstr "Возникла проблема с подключением к при�
 
 msgid "This app has moved to the new Internet Identity"
 msgstr "Это приложение переехало на новую версию Internet Identity"
+
+msgid "This authorization request could not be found. Start the sign-in flow again from the app."
+msgstr ""
+
+msgid "This authorization request is no longer valid. Start the sign-in flow again from the app."
+msgstr ""
 
 msgid "This identity has already been upgraded to the new experience."
 msgstr "Эта учётная запись уже была обновлена до нового интерфейса."

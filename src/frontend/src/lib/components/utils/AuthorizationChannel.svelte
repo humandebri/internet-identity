@@ -16,6 +16,7 @@
   import { type Snippet } from "svelte";
   import { goto } from "$app/navigation";
   import { PostMessageUnsupportedError } from "$lib/utils/transport/postMessage";
+  import { isCanisterError } from "$lib/utils/utils";
 
   class AuthorizeChannelError extends Error {
     #title: string;
@@ -42,6 +43,11 @@
   };
 
   const { options, children }: Props = $props();
+
+  const nativeRequestId =
+    typeof window === "undefined"
+      ? null
+      : new URL(window.location.href).searchParams.get("native_request_id");
 
   const authorizeChannel = (channel: Channel): Promise<void> =>
     new Promise<void>((resolve, reject) => {
@@ -91,38 +97,65 @@
       });
     });
 
-  let authorizePromise = $state(
-    channelStore
-      .establish(options)
-      .catch((error) => {
-        console.error(error); // Log error to console
-        if (error instanceof PostMessageUnsupportedError) {
-          goto("/unsupported");
-          return new Promise<Channel>(() => {}); // Never resolve since we render the unsupported page
-        }
-        return Promise.reject(
-          new AuthorizeChannelError(
-            $t`Unable to connect`,
-            $t`There was an issue connecting with the application. Try a different browser; if the issue persists, contact the developer.`,
-          ),
-        );
-      })
-      .then((channel) => {
-        if (options?.pending === true) {
-          // Don't authorize if we're only doing an initial handshake
-          return;
-        }
-        // Replace promise when channel closes after it was established
-        channel.addEventListener("close", () => {
-          authorizePromise = Promise.reject(
-            new AuthorizeChannelError(
-              $t`Connection closed`,
-              $t`It seems like the connection with the service could not be established. Try a different browser; if the issue persists, contact support.`,
-            ),
+  const authorizeNativeRequest = async (requestId: string): Promise<void> => {
+    try {
+      await authorizationStore.handleNativeRequest(requestId);
+    } catch (error) {
+      if (isCanisterError(error)) {
+        if (error.type === "expired") {
+          throw new AuthorizeChannelError(
+            $t`Request expired`,
+            $t`This authorization request is no longer valid. Start the sign-in flow again from the app.`,
           );
-        });
-        return authorizeChannel(channel);
-      }),
+        }
+        if (
+          error.type === "not_found" ||
+          error.type === "already_completed"
+        ) {
+          throw new AuthorizeChannelError(
+            $t`Invalid request`,
+            $t`This authorization request could not be found. Start the sign-in flow again from the app.`,
+          );
+        }
+      }
+      throw error;
+    }
+  };
+
+  let authorizePromise = $state(
+    nativeRequestId !== null
+      ? authorizeNativeRequest(nativeRequestId)
+      : channelStore
+          .establish(options)
+          .catch((error) => {
+            console.error(error); // Log error to console
+            if (error instanceof PostMessageUnsupportedError) {
+              goto("/unsupported");
+              return new Promise<Channel>(() => {}); // Never resolve since we render the unsupported page
+            }
+            return Promise.reject(
+              new AuthorizeChannelError(
+                $t`Unable to connect`,
+                $t`There was an issue connecting with the application. Try a different browser; if the issue persists, contact the developer.`,
+              ),
+            );
+          })
+          .then((channel) => {
+            if (options?.pending === true) {
+              // Don't authorize if we're only doing an initial handshake
+              return;
+            }
+            // Replace promise when channel closes after it was established
+            channel.addEventListener("close", () => {
+              authorizePromise = Promise.reject(
+                new AuthorizeChannelError(
+                  $t`Connection closed`,
+                  $t`It seems like the connection with the service could not be established. Try a different browser; if the issue persists, contact support.`,
+                ),
+              );
+            });
+            return authorizeChannel(channel);
+          }),
   );
 </script>
 

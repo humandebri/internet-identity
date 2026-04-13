@@ -172,6 +172,63 @@ type GetDelegationResponse = variant {
     no_such_delegation;
 };
 
+type PrepareNativeAuthorizationRequest = record {
+    origin : FrontendHostname;
+    ii_origin : text;
+    session_public_key : SessionKey;
+    return_link : text;
+    max_time_to_live : opt nat64;
+};
+
+type PrepareNativeAuthorizationResponse = record {
+    request_id : text;
+    authorize_url : text;
+    expires_at : Timestamp;
+};
+
+type NativeAuthorizationRequest = record {
+    origin : FrontendHostname;
+    session_public_key : SessionKey;
+    max_time_to_live : opt nat64;
+};
+
+type CompleteNativeAuthorizationResponse = record {
+    redirect_url : text;
+};
+
+type NativeSignedDelegation = record {
+    user_key : UserKey;
+    signed_delegation : SignedDelegation;
+};
+
+type FetchNativeDelegationResponse = variant {
+    pending;
+    signed_delegation : NativeSignedDelegation;
+    expired;
+    not_found;
+};
+
+type PrepareNativeAuthorizationError = variant {
+    invalid_origin : text;
+    invalid_return_link : text;
+    too_many_requests;
+    internal_canister_error : text;
+};
+
+type GetNativeAuthorizationRequestError = variant {
+    not_found;
+    expired;
+    already_completed;
+};
+
+type CompleteNativeAuthorizationError = variant {
+    unauthorized : principal;
+    not_found;
+    expired;
+    already_completed;
+    internal_canister_error : text;
+};
+
 type InternetIdentityStats = record {
     users_registered : nat64;
     storage_layout_version : nat8;
@@ -1145,6 +1202,14 @@ service : (opt InternetIdentityInit) -> {
     // =======================
     prepare_delegation : (UserNumber, FrontendHostname, SessionKey, maxTimeToLive : opt nat64) -> (UserKey, Timestamp);
     get_delegation : (UserNumber, FrontendHostname, SessionKey, Timestamp) -> (GetDelegationResponse) query;
+    prepare_native_authorization : (PrepareNativeAuthorizationRequest) -> (variant { Ok : PrepareNativeAuthorizationResponse; Err : PrepareNativeAuthorizationError });
+    get_native_authorization_request : (request_id : text) -> (variant { Ok : NativeAuthorizationRequest; Err : GetNativeAuthorizationRequestError }) query;
+    complete_native_authorization : (
+        anchor_number : UserNumber,
+        request_id : text,
+        account_number : opt AccountNumber
+    ) -> (variant { Ok : CompleteNativeAuthorizationResponse; Err : CompleteNativeAuthorizationError });
+    fetch_native_delegation : (request_id : text) -> (FetchNativeDelegationResponse) query;
 
     // Attribute sharing protocol
     // ==========================

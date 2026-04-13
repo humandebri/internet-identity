@@ -101,6 +101,34 @@ export interface ArchiveInfo {
    */
   'archive_canister' : [] | [Principal],
 }
+/**
+ * A specification of an attribute to be certified.
+ */
+export interface AttributeSpec {
+  /**
+   * `attribute_scope:attribute_name`
+   * 
+   * Example: `openid:https://accounts.google.com:email`
+   */
+  'key' : string,
+  /**
+   * If `value` is set, this attribute should be certified only if it matches
+   * the current value. This enables the II frontend to request a certificate
+   * for a set of attributes that is guaranteed to be approved by the user.
+   */
+  'value' : [] | [Uint8Array | number[]],
+  /**
+   * Whether the attribute scope should be omitted before certification.
+   * Certifying unscoped attributes is useful, e.g., when the user wants
+   * to share their preferred email without revealing which OpenID
+   * provider they use with II.
+   * 
+   * Examples (e.g., `key = "openid:https://accounts.google.com:email"`):
+   * 1. If `omit_scope = true`, then the certified attribute key is `email`.
+   * 2. Otherwise, the certified attribute key is literally the value of `key`.
+   */
+  'omit_scope' : boolean,
+}
 export type Aud = string;
 /**
  * The authentication methods currently supported by II.
@@ -338,6 +366,12 @@ export type CheckCaptchaError = {
      */
     'WrongSolution' : { 'new_captcha_png_base64' : string }
   };
+export type CompleteNativeAuthorizationError = { 'expired' : null } |
+  { 'internal_canister_error' : string } |
+  { 'not_found' : null } |
+  { 'already_completed' : null } |
+  { 'unauthorized' : Principal };
+export interface CompleteNativeAuthorizationResponse { 'redirect_url' : string }
 export type CreateAccountError = { 'AccountLimitReached' : null } |
   { 'InternalCanisterError' : string } |
   { 'Unauthorized' : Principal } |
@@ -441,6 +475,10 @@ export interface DummyAuthConfig {
    */
   'prompt_for_index' : boolean,
 }
+export type FetchNativeDelegationResponse = { 'expired' : null } |
+  { 'pending' : null } |
+  { 'not_found' : null } |
+  { 'signed_delegation' : NativeSignedDelegation };
 export type FrontendHostname = string;
 export type GetAccountError = {
     'NoSuchOrigin' : { 'anchor_number' : UserNumber }
@@ -497,6 +535,31 @@ export type GetDelegationResponse = {
      */
     'signed_delegation' : SignedDelegation
   };
+export type GetIcrc3AttributeError = { 'AuthorizationError' : Principal } |
+  { 'NoSuchSignature' : null } |
+  { 'ValidationError' : { 'problems' : Array<string> } } |
+  { 'GetAccountError' : GetAccountError };
+export interface GetIcrc3AttributeRequest {
+  /**
+   * Origin of the relying party in the attribute sharing flow.
+   */
+  'origin' : FrontendHostname,
+  /**
+   * II account for the relying party.
+   */
+  'account_number' : [] | [AccountNumber],
+  /**
+   * The message blob from PrepareIcrc3AttributeResponse.
+   */
+  'message' : Uint8Array | number[],
+  /**
+   * Identity for which the attributes were prepared.
+   */
+  'identity_number' : IdentityNumber,
+}
+export interface GetIcrc3AttributeResponse {
+  'signature' : Uint8Array | number[],
+}
 export type GetIdAliasError = {
     /**
      * Internal canister error. See the error message for details.
@@ -527,6 +590,9 @@ export interface GetIdAliasRequest {
   'relying_party' : FrontendHostname,
   'identity_number' : IdentityNumber,
 }
+export type GetNativeAuthorizationRequestError = { 'expired' : null } |
+  { 'not_found' : null } |
+  { 'already_completed' : null };
 export type HeaderField = [string, string];
 export interface HttpRequest {
   'url' : string,
@@ -541,6 +607,12 @@ export interface HttpResponse {
   'upgrade' : [] | [boolean],
   'status_code' : number,
 }
+export type Icrc3Value = { 'Int' : bigint } |
+  { 'Map' : Array<[string, Icrc3Value]> } |
+  { 'Nat' : bigint } |
+  { 'Blob' : Uint8Array | number[] } |
+  { 'Text' : string } |
+  { 'Array' : Array<Icrc3Value> };
 /**
  * The signed id alias credentials for each involved party.
  */
@@ -791,6 +863,29 @@ export type KeyType = { 'platform' : null } |
   { 'cross_platform' : null } |
   { 'unknown' : null } |
   { 'browser_storage_key' : null };
+export type ListAvailableAttributesError = {
+    'AuthorizationError' : Principal
+  } |
+  { 'ValidationError' : { 'problems' : Array<string> } };
+/**
+ * List available attributes
+ */
+export interface ListAvailableAttributesRequest {
+  /**
+   * Optional list of attribute keys to filter by.
+   * Each key is either a fully-scoped key (e.g., "openid:https://accounts.google.com:email")
+   * or an unscoped attribute name (e.g., "email") which matches all scopes.
+   * If not provided, all available attributes are returned.
+   */
+  'attributes' : [] | [Array<string>],
+  /**
+   * Identity for which available attributes should be listed.
+   */
+  'identity_number' : IdentityNumber,
+}
+export type ListAvailableAttributesResponse = Array<
+  [string, Uint8Array | number[]]
+>;
 export type LookupByRegistrationIdError = { 'InvalidRegistrationId' : string };
 /**
  * Map with some variants for the value type.
@@ -816,6 +911,15 @@ export type MetadataMapV2 = Array<
       { 'Bytes' : Uint8Array | number[] },
   ]
 >;
+export interface NativeAuthorizationRequest {
+  'origin' : FrontendHostname,
+  'max_time_to_live' : [] | [bigint],
+  'session_public_key' : SessionKey,
+}
+export interface NativeSignedDelegation {
+  'user_key' : UserKey,
+  'signed_delegation' : SignedDelegation,
+}
 export interface OpenIDRegFinishArg {
   'jwt' : JWT,
   'name' : string,
@@ -891,6 +995,42 @@ export interface PrepareAttributeResponse {
   'attributes' : Array<[string, Uint8Array | number[]]>,
   'issued_at_timestamp_ns' : Timestamp,
 }
+export type PrepareIcrc3AttributeError = { 'AuthorizationError' : Principal } |
+  { 'ValidationError' : { 'problems' : Array<string> } } |
+  { 'GetAccountError' : GetAccountError } |
+  { 'AttributeMismatch' : { 'problems' : Array<string> } };
+export interface PrepareIcrc3AttributeRequest {
+  /**
+   * Origin of the relying party in the attribute sharing flow.
+   */
+  'origin' : FrontendHostname,
+  /**
+   * II account for the relying party.
+   */
+  'account_number' : [] | [AccountNumber],
+  /**
+   * The attributes to be certified.
+   */
+  'attributes' : Array<AttributeSpec>,
+  /**
+   * The nonce is a 32-byte value generated by the relying party.
+   * The purpose of the nonce is to prevent replay attacks and
+   * enable the relying party to expire attributes issued for a given flow.
+   * The value of the nonce will be included into the signed ICRC-3
+   * message as a separate attribute with the key `implicit:nonce`.
+   */
+  'nonce' : Uint8Array | number[],
+  /**
+   * Identity for which the attributes should be prepared.
+   */
+  'identity_number' : IdentityNumber,
+}
+export interface PrepareIcrc3AttributeResponse {
+  /**
+   * Candid-encoded ICRC-3 Value map. Pass this to get_icrc3_attributes.
+   */
+  'message' : Uint8Array | number[],
+}
 export type PrepareIdAliasError = {
     /**
      * Internal canister error. See the error message for details.
@@ -916,6 +1056,24 @@ export interface PrepareIdAliasRequest {
    * Identity for which the IdAlias should be generated.
    */
   'identity_number' : IdentityNumber,
+}
+export type PrepareNativeAuthorizationError = {
+    'internal_canister_error' : string
+  } |
+  { 'too_many_requests' : null } |
+  { 'invalid_return_link' : string } |
+  { 'invalid_origin' : string };
+export interface PrepareNativeAuthorizationRequest {
+  'ii_origin' : string,
+  'origin' : FrontendHostname,
+  'return_link' : string,
+  'max_time_to_live' : [] | [bigint],
+  'session_public_key' : SessionKey,
+}
+export interface PrepareNativeAuthorizationResponse {
+  'request_id' : string,
+  'authorize_url' : string,
+  'expires_at' : Timestamp,
 }
 /**
  * The prepared id alias contains two (still unsigned) credentials in JWT format,
@@ -1187,6 +1345,11 @@ export interface _SERVICE {
     { 'Ok' : IdRegNextStepResult } |
       { 'Err' : CheckCaptchaError }
   >,
+  'complete_native_authorization' : ActorMethod<
+    [UserNumber, string, [] | [AccountNumber]],
+    { 'Ok' : CompleteNativeAuthorizationResponse } |
+      { 'Err' : CompleteNativeAuthorizationError }
+  >,
   'config' : ActorMethod<[], InternetIdentityInit>,
   'create_account' : ActorMethod<
     [UserNumber, FrontendHostname, string],
@@ -1207,6 +1370,10 @@ export interface _SERVICE {
    * Only callable by this IIs archive canister.
    */
   'fetch_entries' : ActorMethod<[], Array<BufferedArchiveEntry>>,
+  'fetch_native_delegation' : ActorMethod<
+    [string],
+    FetchNativeDelegationResponse
+  >,
   'get_account_delegation' : ActorMethod<
     [UserNumber, FrontendHostname, [] | [AccountNumber], SessionKey, Timestamp],
     { 'Ok' : SignedDelegation } |
@@ -1236,10 +1403,20 @@ export interface _SERVICE {
     [UserNumber, FrontendHostname, SessionKey, Timestamp],
     GetDelegationResponse
   >,
+  'get_icrc3_attributes' : ActorMethod<
+    [GetIcrc3AttributeRequest],
+    { 'Ok' : GetIcrc3AttributeResponse } |
+      { 'Err' : GetIcrc3AttributeError }
+  >,
   'get_id_alias' : ActorMethod<
     [GetIdAliasRequest],
     { 'Ok' : IdAliasCredentials } |
       { 'Err' : GetIdAliasError }
+  >,
+  'get_native_authorization_request' : ActorMethod<
+    [string],
+    { 'Ok' : NativeAuthorizationRequest } |
+      { 'Err' : GetNativeAuthorizationRequestError }
   >,
   'get_principal' : ActorMethod<[UserNumber, FrontendHostname], Principal>,
   /**
@@ -1309,6 +1486,11 @@ export interface _SERVICE {
    * ================
    */
   'init_salt' : ActorMethod<[], undefined>,
+  'list_available_attributes' : ActorMethod<
+    [ListAvailableAttributesRequest],
+    { 'Ok' : ListAvailableAttributesResponse } |
+      { 'Err' : ListAvailableAttributesError }
+  >,
   /**
    * Returns all devices of the user (authentication and recovery) but no information about device registrations.
    * Note: Clears out the 'alias' fields on the devices. Use 'get_anchor_info' to obtain the full information.
@@ -1391,6 +1573,15 @@ export interface _SERVICE {
     [UserKey, Timestamp]
   >,
   /**
+   * ICRC-3 Attribute sharing protocol
+   * ==================================
+   */
+  'prepare_icrc3_attributes' : ActorMethod<
+    [PrepareIcrc3AttributeRequest],
+    { 'Ok' : PrepareIcrc3AttributeResponse } |
+      { 'Err' : PrepareIcrc3AttributeError }
+  >,
+  /**
    * Old Verifiable Credentials API
    * ==============================
    * The methods below are used to generate ID-alias credentials during attribute sharing flow.
@@ -1399,6 +1590,11 @@ export interface _SERVICE {
     [PrepareIdAliasRequest],
     { 'Ok' : PreparedIdAlias } |
       { 'Err' : PrepareIdAliasError }
+  >,
+  'prepare_native_authorization' : ActorMethod<
+    [PrepareNativeAuthorizationRequest],
+    { 'Ok' : PrepareNativeAuthorizationResponse } |
+      { 'Err' : PrepareNativeAuthorizationError }
   >,
   'register' : ActorMethod<
     [DeviceData, ChallengeResult, [] | [Principal]],

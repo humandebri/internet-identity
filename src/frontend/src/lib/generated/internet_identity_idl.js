@@ -222,8 +222,18 @@ export const idlFactory = ({ IDL }) => {
     'UnexpectedCall' : IDL.Record({ 'next_step' : RegistrationFlowNextStep }),
     'WrongSolution' : IDL.Record({ 'new_captcha_png_base64' : IDL.Text }),
   });
-  const FrontendHostname = IDL.Text;
   const AccountNumber = IDL.Nat64;
+  const CompleteNativeAuthorizationResponse = IDL.Record({
+    'redirect_url' : IDL.Text,
+  });
+  const CompleteNativeAuthorizationError = IDL.Variant({
+    'expired' : IDL.Null,
+    'internal_canister_error' : IDL.Text,
+    'not_found' : IDL.Null,
+    'already_completed' : IDL.Null,
+    'unauthorized' : IDL.Principal,
+  });
+  const FrontendHostname = IDL.Text;
   const AccountInfo = IDL.Record({
     'name' : IDL.Opt(IDL.Text),
     'origin' : IDL.Text,
@@ -252,7 +262,7 @@ export const idlFactory = ({ IDL }) => {
     'anchor_number' : UserNumber,
     'timestamp' : Timestamp,
   });
-  const SessionKey = PublicKey;
+  const UserKey = PublicKey;
   const Delegation = IDL.Record({
     'pubkey' : PublicKey,
     'targets' : IDL.Opt(IDL.Vec(IDL.Principal)),
@@ -262,6 +272,17 @@ export const idlFactory = ({ IDL }) => {
     'signature' : IDL.Vec(IDL.Nat8),
     'delegation' : Delegation,
   });
+  const NativeSignedDelegation = IDL.Record({
+    'user_key' : UserKey,
+    'signed_delegation' : SignedDelegation,
+  });
+  const FetchNativeDelegationResponse = IDL.Variant({
+    'expired' : IDL.Null,
+    'pending' : IDL.Null,
+    'not_found' : IDL.Null,
+    'signed_delegation' : NativeSignedDelegation,
+  });
+  const SessionKey = PublicKey;
   const AccountDelegationError = IDL.Variant({
     'NoSuchDelegation' : IDL.Null,
     'InternalCanisterError' : IDL.Text,
@@ -352,6 +373,21 @@ export const idlFactory = ({ IDL }) => {
     'no_such_delegation' : IDL.Null,
     'signed_delegation' : SignedDelegation,
   });
+  const GetIcrc3AttributeRequest = IDL.Record({
+    'origin' : FrontendHostname,
+    'account_number' : IDL.Opt(AccountNumber),
+    'message' : IDL.Vec(IDL.Nat8),
+    'identity_number' : IdentityNumber,
+  });
+  const GetIcrc3AttributeResponse = IDL.Record({
+    'signature' : IDL.Vec(IDL.Nat8),
+  });
+  const GetIcrc3AttributeError = IDL.Variant({
+    'AuthorizationError' : IDL.Principal,
+    'NoSuchSignature' : IDL.Null,
+    'ValidationError' : IDL.Record({ 'problems' : IDL.Vec(IDL.Text) }),
+    'GetAccountError' : GetAccountError,
+  });
   const GetIdAliasRequest = IDL.Record({
     'rp_id_alias_jwt' : IDL.Text,
     'issuer' : FrontendHostname,
@@ -372,6 +408,16 @@ export const idlFactory = ({ IDL }) => {
     'InternalCanisterError' : IDL.Text,
     'Unauthorized' : IDL.Principal,
     'NoSuchCredentials' : IDL.Text,
+  });
+  const NativeAuthorizationRequest = IDL.Record({
+    'origin' : FrontendHostname,
+    'max_time_to_live' : IDL.Opt(IDL.Nat64),
+    'session_public_key' : SessionKey,
+  });
+  const GetNativeAuthorizationRequestError = IDL.Variant({
+    'expired' : IDL.Null,
+    'not_found' : IDL.Null,
+    'already_completed' : IDL.Null,
   });
   const HeaderField = IDL.Tuple(IDL.Text, IDL.Text);
   const HttpRequest = IDL.Record({
@@ -442,6 +488,17 @@ export const idlFactory = ({ IDL }) => {
     'AlreadyInProgress' : IDL.Null,
     'RateLimitExceeded' : IDL.Null,
   });
+  const ListAvailableAttributesRequest = IDL.Record({
+    'attributes' : IDL.Opt(IDL.Vec(IDL.Text)),
+    'identity_number' : IdentityNumber,
+  });
+  const ListAvailableAttributesResponse = IDL.Vec(
+    IDL.Tuple(IDL.Text, IDL.Vec(IDL.Nat8))
+  );
+  const ListAvailableAttributesError = IDL.Variant({
+    'AuthorizationError' : IDL.Principal,
+    'ValidationError' : IDL.Record({ 'problems' : IDL.Vec(IDL.Text) }),
+  });
   const DeviceKeyWithAnchor = IDL.Record({
     'pubkey' : DeviceKey,
     'anchor_number' : UserNumber,
@@ -472,7 +529,6 @@ export const idlFactory = ({ IDL }) => {
     'name' : IDL.Text,
     'salt' : Salt,
   });
-  const UserKey = PublicKey;
   const OpenIdPrepareDelegationResponse = IDL.Record({
     'user_key' : UserKey,
     'expiration' : Timestamp,
@@ -497,6 +553,27 @@ export const idlFactory = ({ IDL }) => {
     'ValidationError' : IDL.Record({ 'problems' : IDL.Vec(IDL.Text) }),
     'GetAccountError' : GetAccountError,
   });
+  const AttributeSpec = IDL.Record({
+    'key' : IDL.Text,
+    'value' : IDL.Opt(IDL.Vec(IDL.Nat8)),
+    'omit_scope' : IDL.Bool,
+  });
+  const PrepareIcrc3AttributeRequest = IDL.Record({
+    'origin' : FrontendHostname,
+    'account_number' : IDL.Opt(AccountNumber),
+    'attributes' : IDL.Vec(AttributeSpec),
+    'nonce' : IDL.Vec(IDL.Nat8),
+    'identity_number' : IdentityNumber,
+  });
+  const PrepareIcrc3AttributeResponse = IDL.Record({
+    'message' : IDL.Vec(IDL.Nat8),
+  });
+  const PrepareIcrc3AttributeError = IDL.Variant({
+    'AuthorizationError' : IDL.Principal,
+    'ValidationError' : IDL.Record({ 'problems' : IDL.Vec(IDL.Text) }),
+    'GetAccountError' : GetAccountError,
+    'AttributeMismatch' : IDL.Record({ 'problems' : IDL.Vec(IDL.Text) }),
+  });
   const PrepareIdAliasRequest = IDL.Record({
     'issuer' : FrontendHostname,
     'relying_party' : FrontendHostname,
@@ -510,6 +587,24 @@ export const idlFactory = ({ IDL }) => {
   const PrepareIdAliasError = IDL.Variant({
     'InternalCanisterError' : IDL.Text,
     'Unauthorized' : IDL.Principal,
+  });
+  const PrepareNativeAuthorizationRequest = IDL.Record({
+    'ii_origin' : IDL.Text,
+    'origin' : FrontendHostname,
+    'return_link' : IDL.Text,
+    'max_time_to_live' : IDL.Opt(IDL.Nat64),
+    'session_public_key' : SessionKey,
+  });
+  const PrepareNativeAuthorizationResponse = IDL.Record({
+    'request_id' : IDL.Text,
+    'authorize_url' : IDL.Text,
+    'expires_at' : Timestamp,
+  });
+  const PrepareNativeAuthorizationError = IDL.Variant({
+    'internal_canister_error' : IDL.Text,
+    'too_many_requests' : IDL.Null,
+    'invalid_return_link' : IDL.Text,
+    'invalid_origin' : IDL.Text,
   });
   const ChallengeResult = IDL.Record({
     'key' : ChallengeKey,
@@ -665,6 +760,16 @@ export const idlFactory = ({ IDL }) => {
         ],
         [],
       ),
+    'complete_native_authorization' : IDL.Func(
+        [UserNumber, IDL.Text, IDL.Opt(AccountNumber)],
+        [
+          IDL.Variant({
+            'Ok' : CompleteNativeAuthorizationResponse,
+            'Err' : CompleteNativeAuthorizationError,
+          }),
+        ],
+        [],
+      ),
     'config' : IDL.Func([], [InternetIdentityInit], ['query']),
     'create_account' : IDL.Func(
         [UserNumber, FrontendHostname, IDL.Text],
@@ -676,6 +781,11 @@ export const idlFactory = ({ IDL }) => {
     'enter_device_registration_mode' : IDL.Func([UserNumber], [Timestamp], []),
     'exit_device_registration_mode' : IDL.Func([UserNumber], [], []),
     'fetch_entries' : IDL.Func([], [IDL.Vec(BufferedArchiveEntry)], []),
+    'fetch_native_delegation' : IDL.Func(
+        [IDL.Text],
+        [FetchNativeDelegationResponse],
+        ['query'],
+      ),
     'get_account_delegation' : IDL.Func(
         [
           UserNumber,
@@ -728,9 +838,29 @@ export const idlFactory = ({ IDL }) => {
         [GetDelegationResponse],
         ['query'],
       ),
+    'get_icrc3_attributes' : IDL.Func(
+        [GetIcrc3AttributeRequest],
+        [
+          IDL.Variant({
+            'Ok' : GetIcrc3AttributeResponse,
+            'Err' : GetIcrc3AttributeError,
+          }),
+        ],
+        ['query'],
+      ),
     'get_id_alias' : IDL.Func(
         [GetIdAliasRequest],
         [IDL.Variant({ 'Ok' : IdAliasCredentials, 'Err' : GetIdAliasError })],
+        ['query'],
+      ),
+    'get_native_authorization_request' : IDL.Func(
+        [IDL.Text],
+        [
+          IDL.Variant({
+            'Ok' : NativeAuthorizationRequest,
+            'Err' : GetNativeAuthorizationRequestError,
+          }),
+        ],
         ['query'],
       ),
     'get_principal' : IDL.Func(
@@ -780,6 +910,16 @@ export const idlFactory = ({ IDL }) => {
         [],
       ),
     'init_salt' : IDL.Func([], [], []),
+    'list_available_attributes' : IDL.Func(
+        [ListAvailableAttributesRequest],
+        [
+          IDL.Variant({
+            'Ok' : ListAvailableAttributesResponse,
+            'Err' : ListAvailableAttributesError,
+          }),
+        ],
+        ['query'],
+      ),
     'lookup' : IDL.Func([UserNumber], [IDL.Vec(DeviceData)], ['query']),
     'lookup_by_registration_mode_id' : IDL.Func(
         [RegistrationId],
@@ -862,9 +1002,29 @@ export const idlFactory = ({ IDL }) => {
         [UserKey, Timestamp],
         [],
       ),
+    'prepare_icrc3_attributes' : IDL.Func(
+        [PrepareIcrc3AttributeRequest],
+        [
+          IDL.Variant({
+            'Ok' : PrepareIcrc3AttributeResponse,
+            'Err' : PrepareIcrc3AttributeError,
+          }),
+        ],
+        [],
+      ),
     'prepare_id_alias' : IDL.Func(
         [PrepareIdAliasRequest],
         [IDL.Variant({ 'Ok' : PreparedIdAlias, 'Err' : PrepareIdAliasError })],
+        [],
+      ),
+    'prepare_native_authorization' : IDL.Func(
+        [PrepareNativeAuthorizationRequest],
+        [
+          IDL.Variant({
+            'Ok' : PrepareNativeAuthorizationResponse,
+            'Err' : PrepareNativeAuthorizationError,
+          }),
+        ],
         [],
       ),
     'register' : IDL.Func(

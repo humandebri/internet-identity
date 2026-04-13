@@ -743,6 +743,9 @@ msgstr "Rinomina questo account"
 msgid "Replace it anytime"
 msgstr "Sostituiscila in qualsiasi momento"
 
+msgid "Request expired"
+msgstr ""
+
 msgid "Requires unlocking before it can be reset."
 msgstr "Richiede lo sblocco prima che possa essere reimpostata."
 
@@ -939,6 +942,12 @@ msgstr "Si è verificato un problema durante la connessione all'applicazione. Pr
 
 msgid "This app has moved to the new Internet Identity"
 msgstr "Questa app è stata spostata nella nuova Internet Identity"
+
+msgid "This authorization request could not be found. Start the sign-in flow again from the app."
+msgstr ""
+
+msgid "This authorization request is no longer valid. Start the sign-in flow again from the app."
+msgstr ""
 
 msgid "This identity has already been upgraded to the new experience."
 msgstr "Questa identità è già stata aggiornata alla nuova esperienza."

@@ -8,12 +8,13 @@ import {
   retryFor,
 } from "$lib/utils/utils";
 import { features } from "$lib/legacy/features";
-import { frontendCanisterConfig } from "$lib/globals";
+import { anonymousActor, frontendCanisterConfig } from "$lib/globals";
 import { validateDerivationOrigin } from "$lib/utils/validateDerivationOrigin";
 import { DelegationChain } from "@icp-sdk/core/identity";
 import { AuthRequest, DelegationParams } from "$lib/utils/transport/utils";
 
 export type AuthorizationContext = {
+  kind: "channel" | "native";
   authRequest: AuthRequest; // Additional details e.g. derivation origin
   requestId: string | number; // The ID of the JSON RPC request
   requestOrigin: string; // Displayed to the user to identify the app
@@ -21,19 +22,28 @@ export type AuthorizationContext = {
   isAuthenticating: boolean; // True if user is being redirect back to app
 };
 
+type AuthorizationResult =
+  | {
+      kind: "channel";
+      requestId: string | number;
+      delegationChain: DelegationChain;
+    }
+  | {
+      kind: "native";
+      redirectUrl: string;
+    };
+
 type AuthorizationStore = Readable<AuthorizationContext | undefined> & {
   handleRequest: (
     requestOrigin: string,
     requestId: string | number,
     params: DelegationParams,
   ) => Promise<void>;
+  handleNativeRequest: (requestId: string) => Promise<void>;
   authorize: (
     accountNumber: Promise<bigint | undefined> | bigint | undefined,
     artificialDelay?: number,
-  ) => Promise<{
-    requestId: string | number;
-    delegationChain: DelegationChain;
-  }>;
+  ) => Promise<AuthorizationResult>;
 };
 
 const internalStore = writable<AuthorizationContext | undefined>();
@@ -51,6 +61,7 @@ export const authorizationStore: AuthorizationStore = {
       throw new Error("Unverified origin");
     }
     internalStore.set({
+      kind: "channel",
       authRequest: {
         kind: "authorize-client",
         sessionPublicKey: new Uint8Array(params.publicKey.toDer()),
@@ -60,6 +71,23 @@ export const authorizationStore: AuthorizationStore = {
       requestId,
       requestOrigin,
       effectiveOrigin,
+      isAuthenticating: false,
+    });
+  },
+  handleNativeRequest: async (requestId) => {
+    const { origin, session_public_key, max_time_to_live } = await anonymousActor
+      .get_native_authorization_request(requestId)
+      .then(throwCanisterError);
+    internalStore.set({
+      kind: "native",
+      authRequest: {
+        kind: "authorize-client",
+        sessionPublicKey: new Uint8Array(session_public_key),
+        maxTimeToLive: max_time_to_live[0],
+      },
+      requestId,
+      requestOrigin: origin,
+      effectiveOrigin: origin,
       isAuthenticating: false,
     });
   },
@@ -78,6 +106,20 @@ export const authorizationStore: AuthorizationStore = {
         : (artificialDelay ?? 0),
     );
     const accountNumber = await accountNumberMaybePromise;
+    if (context.kind === "native") {
+      const { redirect_url } = await actor
+        .complete_native_authorization(
+          identityNumber,
+          `${context.requestId}`,
+          accountNumber !== undefined ? [accountNumber] : [],
+        )
+        .then(throwCanisterError);
+      await artificialDelayPromise;
+      return {
+        kind: "native",
+        redirectUrl: redirect_url,
+      };
+    }
     const { user_key, expiration } = await actor
       .prepare_account_delegation(
         identityNumber,
@@ -108,7 +150,11 @@ export const authorizationStore: AuthorizationStore = {
         ),
     );
     await artificialDelayPromise;
-    return { requestId: context.requestId, delegationChain };
+    return {
+      kind: "channel",
+      requestId: context.requestId,
+      delegationChain,
+    };
   },
 };
 

@@ -148,6 +148,88 @@ pub enum GetDelegationResponse {
     NoSuchDelegation,
 }
 
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub struct PrepareNativeAuthorizationRequest {
+    pub origin: FrontendHostname,
+    pub ii_origin: String,
+    pub session_public_key: SessionKey,
+    pub return_link: String,
+    pub max_time_to_live: Option<u64>,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub struct PrepareNativeAuthorizationResponse {
+    pub request_id: String,
+    pub authorize_url: String,
+    pub expires_at: Timestamp,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub struct NativeAuthorizationRequest {
+    pub origin: FrontendHostname,
+    pub session_public_key: SessionKey,
+    pub max_time_to_live: Option<u64>,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub struct CompleteNativeAuthorizationResponse {
+    pub redirect_url: String,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub struct NativeSignedDelegation {
+    pub user_key: UserKey,
+    pub signed_delegation: SignedDelegation,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub enum FetchNativeDelegationResponse {
+    #[serde(rename = "pending")]
+    Pending,
+    #[serde(rename = "signed_delegation")]
+    SignedDelegation(NativeSignedDelegation),
+    #[serde(rename = "expired")]
+    Expired,
+    #[serde(rename = "not_found")]
+    NotFound,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub enum PrepareNativeAuthorizationError {
+    #[serde(rename = "invalid_origin")]
+    InvalidOrigin(String),
+    #[serde(rename = "invalid_return_link")]
+    InvalidReturnLink(String),
+    #[serde(rename = "too_many_requests")]
+    TooManyRequests,
+    #[serde(rename = "internal_canister_error")]
+    InternalCanisterError(String),
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub enum GetNativeAuthorizationRequestError {
+    #[serde(rename = "not_found")]
+    NotFound,
+    #[serde(rename = "expired")]
+    Expired,
+    #[serde(rename = "already_completed")]
+    AlreadyCompleted,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub enum CompleteNativeAuthorizationError {
+    #[serde(rename = "unauthorized")]
+    Unauthorized(Principal),
+    #[serde(rename = "not_found")]
+    NotFound,
+    #[serde(rename = "expired")]
+    Expired,
+    #[serde(rename = "already_completed")]
+    AlreadyCompleted,
+    #[serde(rename = "internal_canister_error")]
+    InternalCanisterError(String),
+}
+
 #[derive(Clone, Debug, CandidType, Deserialize, PartialEq)]
 pub enum AddTentativeDeviceResponse {
     #[serde(rename = "added_tentatively")]

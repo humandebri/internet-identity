@@ -743,6 +743,9 @@ msgstr "اس اکاؤنٹ کا نام تبدیل کریں"
 msgid "Replace it anytime"
 msgstr "اسے کسی بھی وقت تبدیل کریں"
 
+msgid "Request expired"
+msgstr ""
+
 msgid "Requires unlocking before it can be reset."
 msgstr "ری سیٹ کرنے سے پہلے ان لاک کرنا ضروری ہے۔"
 
@@ -939,6 +942,12 @@ msgstr "ایپلیکیشن کے ساتھ منسلک ہونے میں مسئلہ �
 
 msgid "This app has moved to the new Internet Identity"
 msgstr "یہ ایپ نئی Internet Identity پر منتقل ہو گئی ہے"
+
+msgid "This authorization request could not be found. Start the sign-in flow again from the app."
+msgstr ""
+
+msgid "This authorization request is no longer valid. Start the sign-in flow again from the app."
+msgstr ""
 
 msgid "This identity has already been upgraded to the new experience."
 msgstr "یہ شناخت پہلے ہی نئے تجربے پر اپ گریڈ ہو چکی ہے۔"

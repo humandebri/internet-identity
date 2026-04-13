@@ -167,12 +167,16 @@
         const listener = createAttributesListener(config.issuer);
         void $establishedChannelStore.addEventListener("request", listener);
       }
-      const { delegationChain } = await authorizationStore.authorize(undefined);
+      const result = await authorizationStore.authorize(undefined);
       directOpenIdFunnel.trigger(DirectOpenIdEvents.RedirectToApp);
+      if (result.kind === "native") {
+        window.location.assign(result.redirectUrl);
+        return;
+      }
       await $establishedChannelStore.send({
         jsonrpc: "2.0",
         id: $authorizationContextStore.requestId,
-        result: DelegationResultSchema.encode(delegationChain),
+        result: DelegationResultSchema.encode(result.delegationChain),
       });
     }
   });

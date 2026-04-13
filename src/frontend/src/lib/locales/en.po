@@ -743,6 +743,9 @@ msgstr "Rename this account"
 msgid "Replace it anytime"
 msgstr "Replace it anytime"
 
+msgid "Request expired"
+msgstr "Request expired"
+
 msgid "Requires unlocking before it can be reset."
 msgstr "Requires unlocking before it can be reset."
 
@@ -939,6 +942,12 @@ msgstr "There was an issue connecting with the application. Try a different brow
 
 msgid "This app has moved to the new Internet Identity"
 msgstr "This app has moved to the new Internet Identity"
+
+msgid "This authorization request could not be found. Start the sign-in flow again from the app."
+msgstr "This authorization request could not be found. Start the sign-in flow again from the app."
+
+msgid "This authorization request is no longer valid. Start the sign-in flow again from the app."
+msgstr "This authorization request is no longer valid. Start the sign-in flow again from the app."
 
 msgid "This identity has already been upgraded to the new experience."
 msgstr "This identity has already been upgraded to the new experience."

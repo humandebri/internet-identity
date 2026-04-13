@@ -19,13 +19,15 @@
       return;
     }
     redirected = true;
-    const { requestId, delegationChain } =
-      await authorizationStore.authorize(undefined);
-    const result = DelegationResultSchema.encode(delegationChain);
+    const result = await authorizationStore.authorize(undefined);
+    if (result.kind === "native") {
+      window.location.assign(result.redirectUrl);
+      return;
+    }
     await $establishedChannelStore.send({
       jsonrpc: "2.0",
-      id: requestId,
-      result,
+      id: result.requestId,
+      result: DelegationResultSchema.encode(result.delegationChain),
     });
   };
 

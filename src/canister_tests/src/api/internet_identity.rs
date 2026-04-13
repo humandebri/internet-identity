@@ -117,6 +117,71 @@ pub fn get_delegation(
     .map(|(x,)| x)
 }
 
+pub fn prepare_native_authorization(
+    env: &PocketIc,
+    canister_id: CanisterId,
+    request: &types::PrepareNativeAuthorizationRequest,
+) -> Result<
+    Result<types::PrepareNativeAuthorizationResponse, types::PrepareNativeAuthorizationError>,
+    RejectResponse,
+> {
+    call_candid(
+        env,
+        canister_id,
+        RawEffectivePrincipal::None,
+        "prepare_native_authorization",
+        (request,),
+    )
+    .map(|(x,)| x)
+}
+
+pub fn get_native_authorization_request(
+    env: &PocketIc,
+    canister_id: CanisterId,
+    request_id: &str,
+) -> Result<
+    Result<types::NativeAuthorizationRequest, types::GetNativeAuthorizationRequestError>,
+    RejectResponse,
+> {
+    query_candid(
+        env,
+        canister_id,
+        "get_native_authorization_request",
+        (request_id,),
+    )
+    .map(|(x,)| x)
+}
+
+pub fn complete_native_authorization(
+    env: &PocketIc,
+    canister_id: CanisterId,
+    sender: Principal,
+    anchor_number: types::AnchorNumber,
+    request_id: &str,
+    account_number: Option<types::AccountNumber>,
+) -> Result<
+    Result<types::CompleteNativeAuthorizationResponse, types::CompleteNativeAuthorizationError>,
+    RejectResponse,
+> {
+    call_candid_as(
+        env,
+        canister_id,
+        RawEffectivePrincipal::None,
+        sender,
+        "complete_native_authorization",
+        (anchor_number, request_id, account_number),
+    )
+    .map(|(x,)| x)
+}
+
+pub fn fetch_native_delegation(
+    env: &PocketIc,
+    canister_id: CanisterId,
+    request_id: &str,
+) -> Result<types::FetchNativeDelegationResponse, RejectResponse> {
+    query_candid(env, canister_id, "fetch_native_delegation", (request_id,)).map(|(x,)| x)
+}
+
 pub fn get_principal(
     env: &PocketIc,
     canister_id: CanisterId,
