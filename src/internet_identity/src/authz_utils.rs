@@ -139,17 +139,29 @@ pub fn check_authorization(
 pub fn check_authz_and_record_activity(
     anchor_number: AnchorNumber,
 ) -> Result<Option<IIDomain>, IdentityUpdateError> {
-    let (mut anchor, authorization_key) =
+    let (anchor, authorization_key) =
         check_authorization(anchor_number).map_err(IdentityUpdateError::from)?;
 
-    let maybe_domain = match &authorization_key {
-        AuthorizationKey::DeviceKey(device_key) => anchor.device(device_key).unwrap().ii_domain(),
-        _ => None,
-    };
+    record_activity(anchor_number, anchor, authorization_key)
+}
+
+pub fn record_activity(
+    anchor_number: AnchorNumber,
+    mut anchor: Anchor,
+    authorization_key: AuthorizationKey,
+) -> Result<Option<IIDomain>, IdentityUpdateError> {
+    let maybe_domain = ii_domain(&anchor, &authorization_key);
     anchor_management::activity_bookkeeping(&mut anchor, &authorization_key);
     state::storage_borrow_mut(|storage| storage.write(anchor))
         .map_err(|err| IdentityUpdateError::StorageError(anchor_number, err))?;
     Ok(maybe_domain)
+}
+
+fn ii_domain(anchor: &Anchor, authorization_key: &AuthorizationKey) -> Option<IIDomain> {
+    match authorization_key {
+        AuthorizationKey::DeviceKey(device_key) => anchor.device(device_key).unwrap().ii_domain(),
+        _ => None,
+    }
 }
 
 pub fn is_self_authenticating(principal: Principal) -> bool {
