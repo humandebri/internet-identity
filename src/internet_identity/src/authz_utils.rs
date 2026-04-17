@@ -157,7 +157,8 @@ pub fn record_activity(
     Ok(maybe_domain)
 }
 
-fn ii_domain(anchor: &Anchor, authorization_key: &AuthorizationKey) -> Option<IIDomain> {
+// Native authorization reads the II domain before record_activity persists state.
+pub fn ii_domain(anchor: &Anchor, authorization_key: &AuthorizationKey) -> Option<IIDomain> {
     match authorization_key {
         AuthorizationKey::DeviceKey(device_key) => anchor.device(device_key).unwrap().ii_domain(),
         _ => None,

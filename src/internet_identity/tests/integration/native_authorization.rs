@@ -612,6 +612,98 @@ fn should_not_update_last_used_on_already_completed_request() -> Result<(), Reje
 }
 
 #[test]
+fn should_allow_retry_after_completion_fails_midway_before_pending_ttl_expires(
+) -> Result<(), RejectResponse> {
+    let env = env();
+    let canister_id = install_ii_with_archive(&env, None, None);
+    let anchor_number = flows::register_anchor(&env, canister_id);
+    let prepared = api::prepare_native_authorization(&env, canister_id, &native_request())?
+        .expect("prepare native authorization should succeed");
+
+    let failed = api::complete_native_authorization(
+        &env,
+        canister_id,
+        principal_1(),
+        anchor_number,
+        &prepared.request_id,
+        Some(999_999),
+    )?;
+    assert!(matches!(
+        failed,
+        Err(CompleteNativeAuthorizationError::InternalCanisterError(_))
+    ));
+    assert!(matches!(
+        api::get_native_authorization_request(&env, canister_id, &prepared.request_id)?,
+        Ok(_)
+    ));
+    assert!(matches!(
+        api::fetch_native_delegation(&env, canister_id, &prepared.request_id)?,
+        FetchNativeDelegationResponse::Pending
+    ));
+
+    api::complete_native_authorization(
+        &env,
+        canister_id,
+        principal_1(),
+        anchor_number,
+        &prepared.request_id,
+        None,
+    )?
+    .expect("completion retry should succeed");
+    assert!(matches!(
+        api::fetch_native_delegation(&env, canister_id, &prepared.request_id)?,
+        FetchNativeDelegationResponse::SignedDelegation(_)
+    ));
+    Ok(())
+}
+
+#[test]
+fn should_not_extend_pending_ttl_when_completion_fails_midway() -> Result<(), RejectResponse> {
+    let env = env();
+    let canister_id = install_ii_with_archive(&env, None, None);
+    let anchor_number = flows::register_anchor(&env, canister_id);
+    let prepared = api::prepare_native_authorization(&env, canister_id, &native_request())?
+        .expect("prepare native authorization should succeed");
+
+    let failed = api::complete_native_authorization(
+        &env,
+        canister_id,
+        principal_1(),
+        anchor_number,
+        &prepared.request_id,
+        Some(999_999),
+    )?;
+    assert!(matches!(
+        failed,
+        Err(CompleteNativeAuthorizationError::InternalCanisterError(_))
+    ));
+
+    env.advance_time(Duration::from_secs(NATIVE_REQUEST_TTL_SECS + 1));
+    env.tick();
+
+    assert!(matches!(
+        api::get_native_authorization_request(&env, canister_id, &prepared.request_id)?,
+        Err(GetNativeAuthorizationRequestError::Expired)
+    ));
+    assert!(matches!(
+        api::complete_native_authorization(
+            &env,
+            canister_id,
+            principal_1(),
+            anchor_number,
+            &prepared.request_id,
+            None,
+        )?,
+        Err(CompleteNativeAuthorizationError::Expired)
+    ));
+    assert!(matches!(
+        api::fetch_native_delegation(&env, canister_id, &prepared.request_id)?,
+        FetchNativeDelegationResponse::Expired
+    ));
+    Ok(())
+}
+
+#[test]
 fn should_reject_new_requests_when_capacity_is_exhausted_until_pending_requests_expire(
 ) -> Result<(), RejectResponse> {
     let env = env();

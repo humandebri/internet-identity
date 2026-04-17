@@ -2,7 +2,7 @@
 //! This keeps the request state short-lived and reuses existing delegation logic.
 
 use crate::account_management;
-use crate::authz_utils::{check_authorization, record_activity, IdentityUpdateError};
+use crate::authz_utils::{check_authorization, ii_domain, record_activity, IdentityUpdateError};
 use crate::state;
 use crate::state::native_authorization::{
     CompletedNativeAuthorization, NativeAuthorizationRecord, NativeAuthorizationStatus,
@@ -92,7 +92,9 @@ pub fn get_request(
             session_public_key: record.session_public_key,
             max_time_to_live: record.max_time_to_live,
         }),
-        NativeAuthorizationStatus::Completed(_) => {
+        // InProgress stays internal so callers keep the existing external
+        // "single-shot request" contract.
+        NativeAuthorizationStatus::InProgress(_) | NativeAuthorizationStatus::Completed(_) => {
             Err(GetNativeAuthorizationRequestError::AlreadyCompleted)
         }
     }
@@ -104,30 +106,32 @@ pub async fn complete(
     account_number: Option<u64>,
 ) -> Result<CompleteNativeAuthorizationResponse, CompleteNativeAuthorizationError> {
     let (anchor, authorization_key) = check_authorization(anchor_number).map_err(map_authz_err)?;
-    let Some(record) = state::native_authorizations(|native_authorizations| {
-        native_authorizations.get(request_id).cloned()
-    }) else {
-        return Err(CompleteNativeAuthorizationError::NotFound);
-    };
-    if record.expires_at <= time() {
-        return Err(CompleteNativeAuthorizationError::Expired);
-    }
-    if matches!(record.status, NativeAuthorizationStatus::Completed(_)) {
-        return Err(CompleteNativeAuthorizationError::AlreadyCompleted);
-    }
-    let ii_domain = record_activity(anchor_number, anchor, authorization_key)
-        .map_err(map_identity_update_err)?;
+    // Claim first so only one completion path can execute side effects for this request.
+    // This claim is internal only and does not extend the request TTL visible to callers.
+    let record = state::native_authorizations_mut(|native_authorizations| {
+        native_authorizations.claim_for_completion(request_id, time())
+    })?;
+    let ii_domain = ii_domain(&anchor, &authorization_key);
+    release_claim_on_error(
+        record_activity(anchor_number, anchor, authorization_key)
+            .map(|_| ())
+            .map_err(map_identity_update_err),
+        request_id,
+    )?;
 
-    let prepared = account_management::prepare_account_delegation(
-        anchor_number,
-        record.origin.clone(),
-        account_number,
-        record.session_public_key.clone(),
-        record.max_time_to_live,
-        &ii_domain,
-    )
-    .await
-    .map_err(|err| CompleteNativeAuthorizationError::InternalCanisterError(format!("{err:?}")))?;
+    let prepared = release_claim_on_error(
+        account_management::prepare_account_delegation(
+            anchor_number,
+            record.origin.clone(),
+            account_number,
+            record.session_public_key.clone(),
+            record.max_time_to_live,
+            &ii_domain,
+        )
+        .await
+        .map_err(|err| CompleteNativeAuthorizationError::InternalCanisterError(format!("{err:?}"))),
+        request_id,
+    )?;
 
     let redirect_url = format!("{}?native_request_id={request_id}", record.return_link);
     let completed = CompletedNativeAuthorization {
@@ -138,19 +142,11 @@ pub async fn complete(
     };
 
     state::native_authorizations_mut(|native_authorizations| {
-        native_authorizations.prune_expired(time());
-        let Some(record) = native_authorizations.get_mut(request_id) else {
-            return Err(CompleteNativeAuthorizationError::NotFound);
-        };
-        if record.expires_at <= time() {
-            return Err(CompleteNativeAuthorizationError::Expired);
-        }
-        if matches!(record.status, NativeAuthorizationStatus::Completed(_)) {
-            return Err(CompleteNativeAuthorizationError::AlreadyCompleted);
-        }
-        record.expires_at = time().saturating_add(COMPLETED_REQUEST_GRACE_PERIOD_NS);
-        record.status = NativeAuthorizationStatus::Completed(completed);
-        Ok(())
+        native_authorizations.complete_claimed(
+            request_id,
+            completed,
+            time().saturating_add(COMPLETED_REQUEST_GRACE_PERIOD_NS),
+        )
     })?;
 
     Ok(CompleteNativeAuthorizationResponse { redirect_url })
@@ -167,7 +163,10 @@ pub fn fetch(request_id: &str) -> FetchNativeDelegationResponse {
         return FetchNativeDelegationResponse::Expired;
     }
     match record.status {
-        NativeAuthorizationStatus::Pending => FetchNativeDelegationResponse::Pending,
+        // InProgress stays internal, so polling keeps the existing pending-vs-signed contract.
+        NativeAuthorizationStatus::Pending | NativeAuthorizationStatus::InProgress(_) => {
+            FetchNativeDelegationResponse::Pending
+        }
         NativeAuthorizationStatus::Completed(completed) => {
             account_management::get_account_delegation(
                 completed.anchor_number,
@@ -434,11 +433,29 @@ fn map_identity_update_err(err: IdentityUpdateError) -> CompleteNativeAuthorizat
     }
 }
 
+fn release_completion_claim(request_id: &str) {
+    state::native_authorizations_mut(|native_authorizations| {
+        native_authorizations.release_claim(request_id);
+    });
+}
+
+fn release_claim_on_error<T>(
+    result: Result<T, CompleteNativeAuthorizationError>,
+    request_id: &str,
+) -> Result<T, CompleteNativeAuthorizationError> {
+    match result {
+        Ok(value) => Ok(value),
+        Err(err) => {
+            release_completion_claim(request_id);
+            Err(err)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        canonicalize_native_origin_string, canonicalize_return_link_origin,
-        validate_ii_origin,
+        canonicalize_native_origin_string, canonicalize_return_link_origin, validate_ii_origin,
         validate_native_origin_matches_return_link, validate_origin, validate_return_link,
     };
 
