@@ -589,11 +589,11 @@ export const idlFactory = ({ IDL }) => {
     'Unauthorized' : IDL.Principal,
   });
   const PrepareNativeAuthorizationRequest = IDL.Record({
-    'ii_origin' : IDL.Text,
     'origin' : FrontendHostname,
     'return_link' : IDL.Text,
     'max_time_to_live' : IDL.Opt(IDL.Nat64),
     'session_public_key' : SessionKey,
+    'ii_origin' : IDL.Text,
   });
   const PrepareNativeAuthorizationResponse = IDL.Record({
     'request_id' : IDL.Text,
