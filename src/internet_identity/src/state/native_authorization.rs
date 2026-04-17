@@ -5,7 +5,7 @@
 use internet_identity_interface::internet_identity::types::{
     AccountNumber, SessionKey, Timestamp, UserKey,
 };
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 
 const MAX_NATIVE_AUTHORIZATION_REQUESTS: usize = 1_000;
 
@@ -36,7 +36,6 @@ pub struct CompletedNativeAuthorization {
 #[derive(Default)]
 pub struct NativeAuthorizationState {
     records: HashMap<String, NativeAuthorizationRecord>,
-    order: VecDeque<String>,
 }
 
 impl NativeAuthorizationState {
@@ -48,7 +47,6 @@ impl NativeAuthorizationState {
         if self.records.len() >= MAX_NATIVE_AUTHORIZATION_REQUESTS {
             return Err(());
         }
-        self.order.push_back(request_id.clone());
         self.records.insert(request_id, record);
         Ok(())
     }
@@ -63,7 +61,5 @@ impl NativeAuthorizationState {
 
     pub fn prune_expired(&mut self, now: Timestamp) {
         self.records.retain(|_, record| record.expires_at > now);
-        self.order
-            .retain(|request_id| self.records.contains_key(request_id));
     }
 }

@@ -743,9 +743,6 @@ msgstr "Renombra esta cuenta"
 msgid "Replace it anytime"
 msgstr "Reemplázala en cualquier momento"
 
-msgid "Request expired"
-msgstr ""
-
 msgid "Requires unlocking before it can be reset."
 msgstr "Debe desbloquearse antes de poder restablecerse."
 
@@ -942,12 +939,6 @@ msgstr "Hubo un problema al conectar con la aplicación. Prueba con otro navegad
 
 msgid "This app has moved to the new Internet Identity"
 msgstr "Esta app se ha trasladado al nuevo Internet Identity"
-
-msgid "This authorization request could not be found. Start the sign-in flow again from the app."
-msgstr ""
-
-msgid "This authorization request is no longer valid. Start the sign-in flow again from the app."
-msgstr ""
 
 msgid "This identity has already been upgraded to the new experience."
 msgstr "Esta identidad ya ha sido actualizada a la nueva experiencia."

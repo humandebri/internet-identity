@@ -102,19 +102,14 @@
       await authorizationStore.handleNativeRequest(requestId);
     } catch (error) {
       if (isCanisterError(error)) {
-        if (error.type === "expired") {
-          throw new AuthorizeChannelError(
-            $t`Request expired`,
-            $t`This authorization request is no longer valid. Start the sign-in flow again from the app.`,
-          );
-        }
         if (
+          error.type === "expired" ||
           error.type === "not_found" ||
           error.type === "already_completed"
         ) {
           throw new AuthorizeChannelError(
             $t`Invalid request`,
-            $t`This authorization request could not be found. Start the sign-in flow again from the app.`,
+            $t`It seems like an invalid authentication request was received.`,
           );
         }
       }

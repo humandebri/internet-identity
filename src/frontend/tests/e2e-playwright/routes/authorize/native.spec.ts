@@ -11,8 +11,6 @@ test("Shows an error for an unknown native authorization request", async ({
     page.getByRole("heading", { level: 1, name: "Invalid request" }),
   ).toBeVisible();
   await expect(
-    page.getByText(
-      "This authorization request could not be found. Start the sign-in flow again from the app.",
-    ),
+    page.getByText("It seems like an invalid authentication request was received."),
   ).toBeVisible();
 });

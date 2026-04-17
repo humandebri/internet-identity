@@ -743,9 +743,6 @@ msgstr "Ubah nama akun ini"
 msgid "Replace it anytime"
 msgstr "Ganti kapan saja"
 
-msgid "Request expired"
-msgstr ""
-
 msgid "Requires unlocking before it can be reset."
 msgstr "Memerlukan pembukaan kunci sebelum dapat disetel ulang."
 
@@ -942,12 +939,6 @@ msgstr "Terjadi masalah saat menyambung ke aplikasi. Coba peramban lain; jika ma
 
 msgid "This app has moved to the new Internet Identity"
 msgstr "Aplikasi ini telah pindah ke Internet Identity baru"
-
-msgid "This authorization request could not be found. Start the sign-in flow again from the app."
-msgstr ""
-
-msgid "This authorization request is no longer valid. Start the sign-in flow again from the app."
-msgstr ""
 
 msgid "This identity has already been upgraded to the new experience."
 msgstr "Identitas ini sudah ditingkatkan ke pengalaman baru."

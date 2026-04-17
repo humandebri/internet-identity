@@ -743,9 +743,6 @@ msgstr "Hernoem dit account"
 msgid "Replace it anytime"
 msgstr "Vervang het wanneer u wilt"
 
-msgid "Request expired"
-msgstr ""
-
 msgid "Requires unlocking before it can be reset."
 msgstr "Vereist ontgrendeling voordat het kan worden gereset."
 
@@ -942,12 +939,6 @@ msgstr "Er was een probleem bij het verbinden met de applicatie. Probeer een and
 
 msgid "This app has moved to the new Internet Identity"
 msgstr "Deze app is overgegaan naar de nieuwe Internet Identity"
-
-msgid "This authorization request could not be found. Start the sign-in flow again from the app."
-msgstr ""
-
-msgid "This authorization request is no longer valid. Start the sign-in flow again from the app."
-msgstr ""
 
 msgid "This identity has already been upgraded to the new experience."
 msgstr "Deze identiteit is al geüpgraded naar de nieuwe ervaring."
