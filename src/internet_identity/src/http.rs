@@ -12,13 +12,12 @@ use std::collections::BTreeMap;
 
 mod metrics;
 
-fn http_options_request() -> HttpResponse {
-    // TODO: Restrict origin to just the II-specific origins.
+fn http_options_request(url: &str) -> HttpResponse {
     let headers = vec![
         ("Access-Control-Allow-Origin".to_string(), "*".to_string()),
         (
             "Access-Control-Allow-Methods".to_string(),
-            "GET, POST, OPTIONS".to_string(),
+            allowed_methods_for_path(url).to_string(),
         ),
         (
             "Access-Control-Allow-Headers".to_string(),
@@ -141,7 +140,7 @@ pub fn http_request(req: HttpRequest) -> HttpResponse {
     } = req;
 
     match method.as_str() {
-        "OPTIONS" => http_options_request(),
+        "OPTIONS" => http_options_request(&url),
         "GET" if url.split('?').next().unwrap_or_default() == "/oauth2/token" => {
             method_not_allowed("GET", allowed_methods_for_path(&url))
         }

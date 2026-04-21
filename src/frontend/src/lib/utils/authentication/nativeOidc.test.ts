@@ -198,6 +198,35 @@ describe("nativeOidc", () => {
     );
   });
 
+  it("passes only token inputs to code exchange and only delegation inputs to delegation fetch", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(tokenBody))
+      .mockResolvedValueOnce(jsonResponse(delegationBody));
+
+    await completeNativeOidcLogin({
+      tokenEndpoint: "https://gateway.example/oauth2/token",
+      delegationEndpoint: "https://gateway.example/oauth2/delegation",
+      fetchFn: fetchMock,
+      clientId: "com.example.app",
+      code: "native-code",
+      codeVerifier: "native-verifier",
+      redirectUri: "com.example.app:/oauth2redirect/ii",
+      sessionIdentity: Ed25519KeyIdentity.generate(),
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "https://gateway.example/oauth2/token",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://gateway.example/oauth2/delegation",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
   it("surfaces delegation exchange errors without polling", async () => {
     const fetchMock = vi
       .fn()

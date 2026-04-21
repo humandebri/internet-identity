@@ -293,17 +293,12 @@ pub async fn redeem_code(
         ));
     };
     let token_record = NativeAccessTokenRecord {
-        request_id: request.code.clone(),
         anchor_number: authorized.anchor_number,
         account_number: authorized.account_number,
         origin: record.origin.clone(),
         session_public_key: record.session_public_key.clone(),
         user_key: authorized.user_key.clone(),
         expiration: authorized.expiration,
-        issuer: record.issuer.clone(),
-        client_id: record.client_id.clone(),
-        nonce: record.nonce.clone(),
-        scope: record.scope.clone(),
         expires_at: now.saturating_add(ACCESS_TOKEN_TTL_NS),
     };
     let id_token = sign_id_token(

@@ -141,6 +141,18 @@ token is a short-lived exchange token, not a general Bearer token, but query tra
 surface it in server logs, proxies, or APM systems. Prefer the header transport and avoid copying
 or persisting legacy request URLs.
 
+## Compatibility And Limitations
+
+- The legacy query transport stays available as a temporary compatibility path for clients that
+  still rely on URL-based delegation exchange. New integrations should treat it as deprecated and
+  use the `Authorization` header transport instead.
+- `prepare_native_authorization` is anonymously callable and currently uses only global capacity
+  limits for pending requests and exchange tokens. This keeps the first version simple, but it does
+  not yet provide per-client, per-origin, or caller-scoped abuse controls.
+- `id_token.sub` is pairwise per `client_id`, but it is still derived under the configured issuer.
+  Operators that change the issuer origin should expect subject rotation and plan migrations
+  accordingly.
+
 ## Redirect URI Policy
 
 Supported redirect URI classes:

@@ -1096,7 +1096,7 @@ fn ii_canister_serves_native_oidc_token_and_delegation_http_endpoints() -> Resul
     assert_header_value(
         &delegation_preflight_response.headers,
         "Access-Control-Allow-Methods",
-        "GET, POST, OPTIONS",
+        "GET, OPTIONS",
     );
     assert_header_value(
         &delegation_preflight_response.headers,
@@ -1120,7 +1120,7 @@ fn ii_canister_serves_native_oidc_token_and_delegation_http_endpoints() -> Resul
     assert_header_value(
         &token_preflight_response.headers,
         "Access-Control-Allow-Methods",
-        "GET, POST, OPTIONS",
+        "POST, OPTIONS",
     );
     assert_header_value(
         &token_preflight_response.headers,

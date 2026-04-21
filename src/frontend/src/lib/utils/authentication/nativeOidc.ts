@@ -27,23 +27,30 @@ type FetchFn = typeof fetch;
 
 type NativeOidcEndpointConfig = {
   issuer?: string;
-  tokenEndpoint?: string;
-  delegationEndpoint?: string;
   fetchFn?: FetchFn;
 };
 
-type NativeOidcCodeExchangeInput = NativeOidcEndpointConfig & {
+type NativeOidcCodeExchangeEndpointConfig = NativeOidcEndpointConfig & {
+  tokenEndpoint?: string;
+};
+
+type NativeOidcDelegationEndpointConfig = NativeOidcEndpointConfig & {
+  delegationEndpoint?: string;
+};
+
+type NativeOidcCodeExchangeInput = NativeOidcCodeExchangeEndpointConfig & {
   clientId: string;
   code: string;
   codeVerifier: string;
   redirectUri: string;
 };
 
-type NativeOidcDelegationInput = NativeOidcEndpointConfig & {
+type NativeOidcDelegationInput = NativeOidcDelegationEndpointConfig & {
   accessToken: string;
 };
 
-type CompleteNativeOidcLoginInput = NativeOidcCodeExchangeInput & {
+type CompleteNativeOidcLoginInput = NativeOidcCodeExchangeInput &
+  NativeOidcDelegationEndpointConfig & {
   sessionIdentity: SignIdentity;
 };
 
@@ -141,12 +148,16 @@ export const completeNativeOidcLogin = async (
 ): Promise<CompleteNativeOidcLoginResult> => {
   const endpoints = await resolveCompleteNativeOidcEndpoints(input);
   const tokenResponse = await exchangeNativeOidcCode({
-    ...input,
+    clientId: input.clientId,
+    code: input.code,
+    codeVerifier: input.codeVerifier,
+    redirectUri: input.redirectUri,
+    fetchFn: input.fetchFn,
+    issuer: input.issuer,
     tokenEndpoint: endpoints.tokenEndpoint,
-    delegationEndpoint: endpoints.delegationEndpoint,
   });
   const { delegationResponse, delegationChain } = await fetchIcDelegation({
-    tokenEndpoint: endpoints.tokenEndpoint,
+    issuer: input.issuer,
     delegationEndpoint: endpoints.delegationEndpoint,
     fetchFn: input.fetchFn,
     accessToken: tokenResponse.access_token,
@@ -163,7 +174,7 @@ export const completeNativeOidcLogin = async (
 };
 
 const resolveNativeOidcEndpoints = async (
-  input: NativeOidcEndpointConfig,
+  input: NativeOidcCodeExchangeEndpointConfig & NativeOidcDelegationEndpointConfig,
 ): Promise<{ tokenEndpoint: string; delegationEndpoint: string }> => {
   if (
     input.tokenEndpoint !== undefined &&
@@ -191,7 +202,7 @@ const resolveNativeOidcEndpoints = async (
 };
 
 const resolveCompleteNativeOidcEndpoints = (
-  input: NativeOidcEndpointConfig,
+  input: NativeOidcCodeExchangeEndpointConfig & NativeOidcDelegationEndpointConfig,
 ): Promise<{ tokenEndpoint: string; delegationEndpoint: string }> => {
   if (input.issuer !== undefined) {
     return resolveNativeOidcEndpoints(input);
@@ -214,19 +225,35 @@ const resolveCompleteNativeOidcEndpoints = (
 };
 
 const resolveTokenEndpoint = async (
-  input: NativeOidcEndpointConfig,
+  input: NativeOidcCodeExchangeEndpointConfig,
 ): Promise<string> => {
   if (input.tokenEndpoint !== undefined) {
     return input.tokenEndpoint;
   }
-  return (await resolveNativeOidcEndpoints(input)).tokenEndpoint;
+  if (input.issuer === undefined) {
+    throw new Error("issuer is required when tokenEndpoint is missing");
+  }
+  return (
+    await resolveNativeOidcEndpoints({
+      issuer: input.issuer,
+      fetchFn: input.fetchFn,
+    })
+  ).tokenEndpoint;
 };
 
 const resolveDelegationEndpoint = async (
-  input: NativeOidcEndpointConfig,
+  input: NativeOidcDelegationEndpointConfig,
 ): Promise<string> => {
   if (input.delegationEndpoint !== undefined) {
     return input.delegationEndpoint;
   }
-  return (await resolveNativeOidcEndpoints(input)).delegationEndpoint;
+  if (input.issuer === undefined) {
+    throw new Error("issuer is required when delegationEndpoint is missing");
+  }
+  return (
+    await resolveNativeOidcEndpoints({
+      issuer: input.issuer,
+      fetchFn: input.fetchFn,
+    })
+  ).delegationEndpoint;
 };

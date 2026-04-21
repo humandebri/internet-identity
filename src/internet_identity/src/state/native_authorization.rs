@@ -51,19 +51,13 @@ pub struct AuthorizedNativeAuthorization {
 }
 
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub struct NativeAccessTokenRecord {
-    pub request_id: String,
     pub anchor_number: u64,
     pub account_number: Option<AccountNumber>,
     pub origin: String,
     pub session_public_key: SessionKey,
     pub user_key: UserKey,
     pub expiration: Timestamp,
-    pub issuer: String,
-    pub client_id: String,
-    pub nonce: String,
-    pub scope: Vec<String>,
     pub expires_at: Timestamp,
 }
 
@@ -296,17 +290,12 @@ mod tests {
             .expect("complete should succeed");
 
         let token_record = NativeAccessTokenRecord {
-            request_id: "request".to_string(),
             anchor_number: 42,
             account_number: None,
             origin: "https://app.example.com".to_string(),
             session_public_key: ByteBuf::from(b"session".to_vec()),
             user_key: ByteBuf::from(b"user".to_vec()),
             expiration: 777,
-            issuer: "https://identity.test".to_string(),
-            client_id: "https://app.example.com".to_string(),
-            nonce: "nonce".to_string(),
-            scope: vec!["openid".to_string()],
             expires_at: 150,
         };
 
