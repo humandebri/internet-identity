@@ -2,6 +2,7 @@
 // `def` parameter.
 import type { SignedDelegation } from "$lib/generated/internet_identity_types";
 import { Signature } from "@icp-sdk/core/agent";
+import { Principal } from "@icp-sdk/core/principal";
 import {
   Delegation,
   SignedDelegation as FrontendSignedDelegation,
@@ -355,11 +356,14 @@ export const toHex = (bytes: Uint8Array): string => {
 export const transformSignedDelegation = (
   signed_delegation: SignedDelegation,
 ): FrontendSignedDelegation => {
+  const targets = signed_delegation.delegation.targets[0]?.map((target) =>
+    typeof target === "string" ? Principal.fromText(target) : target,
+  );
   return {
     delegation: new Delegation(
       Uint8Array.from(signed_delegation.delegation.pubkey),
       signed_delegation.delegation.expiration,
-      undefined,
+      targets,
     ),
     signature: Uint8Array.from(
       signed_delegation.signature,

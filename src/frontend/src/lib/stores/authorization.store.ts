@@ -75,9 +75,10 @@ export const authorizationStore: AuthorizationStore = {
     });
   },
   handleNativeRequest: async (requestId) => {
-    const { origin, session_public_key, max_time_to_live } = await anonymousActor
-      .get_native_authorization_request(requestId)
-      .then(throwCanisterError);
+    const { origin, session_public_key, max_time_to_live } =
+      await anonymousActor
+        .get_native_authorization_request(requestId)
+        .then(throwCanisterError);
     internalStore.set({
       kind: "native",
       authRequest: {
