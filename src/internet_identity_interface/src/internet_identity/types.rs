@@ -153,7 +153,15 @@ pub struct PrepareNativeAuthorizationRequest {
     pub origin: FrontendHostname,
     pub ii_origin: String,
     pub session_public_key: SessionKey,
-    pub return_link: String,
+    pub redirect_uri: String,
+    pub client_id: String,
+    pub state: String,
+    pub scope: Vec<String>,
+    pub nonce: String,
+    pub code_challenge: String,
+    pub code_challenge_method: String,
+    pub response_type: String,
+    pub response_mode: String,
     pub max_time_to_live: Option<u64>,
 }
 
@@ -167,6 +175,11 @@ pub struct PrepareNativeAuthorizationResponse {
 #[derive(Clone, Debug, CandidType, Deserialize)]
 pub struct NativeAuthorizationRequest {
     pub origin: FrontendHostname,
+    pub redirect_uri: String,
+    pub client_id: String,
+    pub state: String,
+    pub scope: Vec<String>,
+    pub nonce: String,
     pub session_public_key: SessionKey,
     pub max_time_to_live: Option<u64>,
 }
@@ -177,29 +190,42 @@ pub struct CompleteNativeAuthorizationResponse {
 }
 
 #[derive(Clone, Debug, CandidType, Deserialize)]
-pub struct NativeSignedDelegation {
-    pub user_key: UserKey,
-    pub signed_delegation: SignedDelegation,
+pub struct RedeemNativeAuthorizationCodeRequest {
+    pub grant_type: String,
+    pub code: String,
+    pub redirect_uri: String,
+    pub code_verifier: String,
+    pub client_id: String,
 }
 
 #[derive(Clone, Debug, CandidType, Deserialize)]
-pub enum FetchNativeDelegationResponse {
-    #[serde(rename = "pending")]
-    Pending,
-    #[serde(rename = "signed_delegation")]
-    SignedDelegation(NativeSignedDelegation),
-    #[serde(rename = "expired")]
-    Expired,
-    #[serde(rename = "not_found")]
-    NotFound,
+pub struct RedeemNativeAuthorizationCodeResponse {
+    pub access_token: String,
+    pub token_type: String,
+    pub expires_in: u64,
+    pub id_token: String,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub struct ExchangeNativeAccessTokenForDelegationRequest {
+    pub access_token: String,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub struct ExchangeNativeAccessTokenForDelegationResponse {
+    pub user_key: UserKey,
+    pub signed_delegation: SignedDelegation,
+    pub expiration: Timestamp,
 }
 
 #[derive(Clone, Debug, CandidType, Deserialize)]
 pub enum PrepareNativeAuthorizationError {
     #[serde(rename = "invalid_origin")]
     InvalidOrigin(String),
-    #[serde(rename = "invalid_return_link")]
-    InvalidReturnLink(String),
+    #[serde(rename = "invalid_redirect_uri")]
+    InvalidRedirectUri(String),
+    #[serde(rename = "invalid_request")]
+    InvalidRequest(String),
     #[serde(rename = "too_many_requests")]
     TooManyRequests,
     #[serde(rename = "internal_canister_error")]
@@ -226,6 +252,30 @@ pub enum CompleteNativeAuthorizationError {
     Expired,
     #[serde(rename = "already_completed")]
     AlreadyCompleted,
+    #[serde(rename = "internal_canister_error")]
+    InternalCanisterError(String),
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub enum RedeemNativeAuthorizationCodeError {
+    #[serde(rename = "invalid_grant")]
+    InvalidGrant(String),
+    #[serde(rename = "invalid_request")]
+    InvalidRequest(String),
+    #[serde(rename = "unsupported_grant_type")]
+    UnsupportedGrantType(String),
+    #[serde(rename = "internal_canister_error")]
+    InternalCanisterError(String),
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub enum ExchangeNativeAccessTokenForDelegationError {
+    #[serde(rename = "invalid_token")]
+    InvalidToken(String),
+    #[serde(rename = "expired")]
+    Expired,
+    #[serde(rename = "not_found")]
+    NotFound,
     #[serde(rename = "internal_canister_error")]
     InternalCanisterError(String),
 }
@@ -319,12 +369,16 @@ pub struct InternetIdentityFrontendArgs {
 #[derive(Clone, Debug, CandidType, Deserialize, Default, Eq, PartialEq)]
 pub struct InternetIdentitySynchronizedConfig {
     pub openid_configs: Option<Vec<OpenIdConfig>>,
+    pub native_oidc_clients: Option<Vec<NativeOidcClientConfig>>,
+    pub native_oidc_issuer_origin: Option<String>,
 }
 
 impl From<&InternetIdentityInit> for InternetIdentitySynchronizedConfig {
     fn from(value: &InternetIdentityInit) -> Self {
         Self {
             openid_configs: value.openid_configs.clone(),
+            native_oidc_clients: value.native_oidc_clients.clone(),
+            native_oidc_issuer_origin: value.native_oidc_issuer_origin.clone(),
         }
     }
 }
@@ -346,6 +400,8 @@ pub struct InternetIdentityInit {
     pub related_origins: Option<Vec<String>>,
     pub new_flow_origins: Option<Vec<String>>,
     pub openid_configs: Option<Vec<OpenIdConfig>>,
+    pub native_oidc_clients: Option<Vec<NativeOidcClientConfig>>,
+    pub native_oidc_issuer_origin: Option<String>,
     pub analytics_config: Option<Option<AnalyticsConfig>>,
     pub enable_dapps_explorer: Option<bool>,
     pub is_production: Option<bool>,
@@ -460,6 +516,28 @@ pub struct OpenIdConfig {
     pub auth_scope: Vec<String>,
     pub fedcm_uri: Option<String>,
     pub email_verification: Option<OpenIdEmailVerificationScheme>,
+}
+
+#[derive(Clone, Copy, Debug, CandidType, Serialize, Deserialize, Eq, PartialEq)]
+pub enum NativeOidcApplicationType {
+    #[serde(rename = "native")]
+    Native,
+}
+
+#[derive(Clone, Copy, Debug, CandidType, Serialize, Deserialize, Eq, PartialEq)]
+pub enum NativeOidcTokenEndpointAuthMethod {
+    #[serde(rename = "none")]
+    None,
+}
+
+#[derive(Clone, Debug, CandidType, Serialize, Deserialize, Eq, PartialEq)]
+pub struct NativeOidcClientConfig {
+    pub client_id: String,
+    pub redirect_uris: Vec<String>,
+    pub allowed_origins: Vec<String>,
+    pub application_type: NativeOidcApplicationType,
+    pub token_endpoint_auth_method: NativeOidcTokenEndpointAuthMethod,
+    pub require_pkce: bool,
 }
 
 pub enum AuthorizationKey {

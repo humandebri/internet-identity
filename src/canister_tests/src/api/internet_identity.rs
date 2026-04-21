@@ -174,12 +174,42 @@ pub fn complete_native_authorization(
     .map(|(x,)| x)
 }
 
-pub fn fetch_native_delegation(
+pub fn redeem_native_authorization_code(
     env: &PocketIc,
     canister_id: CanisterId,
-    request_id: &str,
-) -> Result<types::FetchNativeDelegationResponse, RejectResponse> {
-    query_candid(env, canister_id, "fetch_native_delegation", (request_id,)).map(|(x,)| x)
+    request: &types::RedeemNativeAuthorizationCodeRequest,
+) -> Result<
+    Result<types::RedeemNativeAuthorizationCodeResponse, types::RedeemNativeAuthorizationCodeError>,
+    RejectResponse,
+> {
+    call_candid(
+        env,
+        canister_id,
+        RawEffectivePrincipal::None,
+        "redeem_native_authorization_code",
+        (request,),
+    )
+    .map(|(x,)| x)
+}
+
+pub fn exchange_native_access_token_for_delegation(
+    env: &PocketIc,
+    canister_id: CanisterId,
+    request: &types::ExchangeNativeAccessTokenForDelegationRequest,
+) -> Result<
+    Result<
+        types::ExchangeNativeAccessTokenForDelegationResponse,
+        types::ExchangeNativeAccessTokenForDelegationError,
+    >,
+    RejectResponse,
+> {
+    query_candid(
+        env,
+        canister_id,
+        "exchange_native_access_token_for_delegation",
+        (request,),
+    )
+    .map(|(x,)| x)
 }
 
 pub fn get_principal(

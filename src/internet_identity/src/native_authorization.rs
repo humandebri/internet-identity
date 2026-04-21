@@ -1,28 +1,54 @@
-//! Native authorization request lifecycle and validation.
-//! This keeps the request state short-lived and reuses existing delegation logic.
+//! Native browser authorization with OAuth-style code redemption and delegation exchange.
 
 use crate::account_management;
 use crate::authz_utils::{check_authorization, ii_domain, record_activity, IdentityUpdateError};
 use crate::state;
 use crate::state::native_authorization::{
-    CompletedNativeAuthorization, NativeAuthorizationRecord, NativeAuthorizationStatus,
+    AuthorizedNativeAuthorization, NativeAccessTokenRecord, NativeAuthorizationRecord,
+    NativeAuthorizationStatus,
 };
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use ic_cdk::api::time;
 use internet_identity_interface::internet_identity::types::{
     CompleteNativeAuthorizationError, CompleteNativeAuthorizationResponse,
-    FetchNativeDelegationResponse, GetNativeAuthorizationRequestError, NativeAuthorizationRequest,
-    NativeSignedDelegation, PrepareNativeAuthorizationError, PrepareNativeAuthorizationRequest,
-    PrepareNativeAuthorizationResponse,
+    ExchangeNativeAccessTokenForDelegationError, ExchangeNativeAccessTokenForDelegationRequest,
+    ExchangeNativeAccessTokenForDelegationResponse, GetNativeAuthorizationRequestError,
+    NativeAuthorizationRequest, NativeOidcApplicationType, NativeOidcClientConfig,
+    NativeOidcTokenEndpointAuthMethod, PrepareNativeAuthorizationError,
+    PrepareNativeAuthorizationRequest, PrepareNativeAuthorizationResponse,
+    RedeemNativeAuthorizationCodeError, RedeemNativeAuthorizationCodeRequest,
+    RedeemNativeAuthorizationCodeResponse,
 };
+use rand::SeedableRng;
+use rand_chacha::ChaCha20Rng;
+use rsa::pkcs1v15::SigningKey;
+use rsa::signature::{SignatureEncoding, Signer};
+use rsa::traits::PublicKeyParts;
+use rsa::RsaPrivateKey;
+use serde::Serialize;
+use sha2::{Digest, Sha256};
+use std::cell::RefCell;
 
 const REQUEST_ID_NUM_BYTES: usize = 32;
+const TOKEN_NUM_BYTES: usize = 32;
 const HTTPS_URL_MAX_BYTES: usize = 512;
+const LOOPBACK_URL_MAX_BYTES: usize = 512;
 const ORIGIN_MAX_BYTES: usize = 255;
-const HTTPS_DEFAULT_PORT: u16 = 443;
+const STATE_MAX_BYTES: usize = 512;
+const NONCE_MAX_BYTES: usize = 512;
+const CLIENT_ID_MAX_BYTES: usize = 255;
+const PKCE_MAX_BYTES: usize = 255;
 const PENDING_REQUEST_TTL_NS: u64 = 5 * 60 * 1_000_000_000;
-const COMPLETED_REQUEST_GRACE_PERIOD_NS: u64 = 5 * 60 * 1_000_000_000;
+const CODE_TTL_NS: u64 = 5 * 60 * 1_000_000_000;
+const COMPLETED_REQUEST_GRACE_PERIOD_NS: u64 = 10 * 60 * 1_000_000_000;
+const ACCESS_TOKEN_TTL_NS: u64 = 5 * 60 * 1_000_000_000;
+const TOKEN_TYPE_SEGMENT: &str = "/oauth/token-type/native-access-token";
+const DEFAULT_NATIVE_OIDC_ISSUER_ORIGIN: &str = "https://identity.internetcomputer.org";
+
+thread_local! {
+    static SIGNING_KEY_CACHE: RefCell<Option<RsaPrivateKey>> = const { RefCell::new(None) };
+}
 
 #[derive(Debug, Eq, PartialEq)]
 struct CanonicalOrigin {
@@ -31,21 +57,72 @@ struct CanonicalOrigin {
     port: u16,
 }
 
+#[derive(Debug, Eq, PartialEq)]
+enum RedirectUriKind {
+    ClaimedHttps(CanonicalOrigin),
+    PrivateScheme,
+    Loopback,
+}
+
+#[derive(Clone)]
+struct RegisteredNativeClient {
+    client_id: String,
+    redirect_uris: Vec<String>,
+    allowed_origins: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct OpenIdConfiguration<'a> {
+    issuer: &'a str,
+    authorization_endpoint: String,
+    token_endpoint: String,
+    ic_delegation_endpoint: String,
+    jwks_uri: String,
+    response_types_supported: Vec<&'static str>,
+    grant_types_supported: Vec<&'static str>,
+    subject_types_supported: Vec<&'static str>,
+    id_token_signing_alg_values_supported: Vec<&'static str>,
+    code_challenge_methods_supported: Vec<&'static str>,
+    token_endpoint_auth_methods_supported: Vec<&'static str>,
+}
+
+#[derive(Serialize)]
+struct JwksDocument {
+    keys: Vec<JwkDocument>,
+}
+
+#[derive(Serialize)]
+struct JwkDocument {
+    kty: &'static str,
+    #[serde(rename = "use")]
+    use_: &'static str,
+    alg: &'static str,
+    kid: String,
+    n: String,
+    e: String,
+}
+
+#[derive(Serialize)]
+struct IdTokenClaims<'a> {
+    iss: &'a str,
+    sub: String,
+    aud: &'a str,
+    exp: u64,
+    iat: u64,
+    auth_time: u64,
+    nonce: &'a str,
+}
+
 pub async fn prepare(
     request: PrepareNativeAuthorizationRequest,
 ) -> Result<PrepareNativeAuthorizationResponse, PrepareNativeAuthorizationError> {
-    validate_origin(&request.origin).map_err(PrepareNativeAuthorizationError::InvalidOrigin)?;
-    validate_ii_origin(&request.ii_origin)
-        .map_err(PrepareNativeAuthorizationError::InvalidOrigin)?;
-    validate_return_link(&request.return_link)
-        .map_err(PrepareNativeAuthorizationError::InvalidReturnLink)?;
+    let registered_client = validate_prepare_request(&request)?;
     let origin = canonicalize_native_origin_string(&request.origin)
         .map_err(PrepareNativeAuthorizationError::InvalidOrigin)?;
-    validate_native_origin_matches_return_link(&origin, &request.return_link)
-        .map_err(PrepareNativeAuthorizationError::InvalidOrigin)?;
     let ii_origin = request.ii_origin.trim_end_matches('/').to_string();
+    let issuer = configured_issuer_origin();
 
-    let request_id = random_request_id().await.map_err(|err| {
+    let request_id = random_token(REQUEST_ID_NUM_BYTES).await.map_err(|err| {
         PrepareNativeAuthorizationError::InternalCanisterError(format!(
             "failed to generate request id: {err}"
         ))
@@ -53,12 +130,20 @@ pub async fn prepare(
     let expires_at = time().saturating_add(PENDING_REQUEST_TTL_NS);
     let record = NativeAuthorizationRecord {
         origin,
+        redirect_uri: request.redirect_uri,
+        client_id: request.client_id,
+        state: request.state,
+        scope: request.scope,
+        nonce: request.nonce,
+        code_challenge: request.code_challenge,
+        code_challenge_method: request.code_challenge_method,
         session_public_key: request.session_public_key,
-        return_link: request.return_link,
         max_time_to_live: request.max_time_to_live,
+        issuer,
         expires_at,
         status: NativeAuthorizationStatus::Pending,
     };
+    debug_assert_eq!(registered_client.client_id, record.client_id);
 
     state::native_authorizations_mut(|native_authorizations| {
         native_authorizations.prune_expired(time());
@@ -89,12 +174,15 @@ pub fn get_request(
     match record.status {
         NativeAuthorizationStatus::Pending => Ok(NativeAuthorizationRequest {
             origin: record.origin,
+            redirect_uri: record.redirect_uri,
+            client_id: record.client_id,
+            state: record.state,
+            scope: record.scope,
+            nonce: record.nonce,
             session_public_key: record.session_public_key,
             max_time_to_live: record.max_time_to_live,
         }),
-        // InProgress stays internal so callers keep the existing external
-        // "single-shot request" contract.
-        NativeAuthorizationStatus::InProgress(_) | NativeAuthorizationStatus::Completed(_) => {
+        NativeAuthorizationStatus::InProgress(_) | NativeAuthorizationStatus::Authorized(_) => {
             Err(GetNativeAuthorizationRequestError::AlreadyCompleted)
         }
     }
@@ -106,8 +194,6 @@ pub async fn complete(
     account_number: Option<u64>,
 ) -> Result<CompleteNativeAuthorizationResponse, CompleteNativeAuthorizationError> {
     let (anchor, authorization_key) = check_authorization(anchor_number).map_err(map_authz_err)?;
-    // Claim first so only one completion path can execute side effects for this request.
-    // This claim is internal only and does not extend the request TTL visible to callers.
     let record = state::native_authorizations_mut(|native_authorizations| {
         native_authorizations.claim_for_completion(request_id, time())
     })?;
@@ -133,77 +219,459 @@ pub async fn complete(
         request_id,
     )?;
 
-    let redirect_url = format!("{}?native_request_id={request_id}", record.return_link);
-    let completed = CompletedNativeAuthorization {
+    let now = time();
+    let redirect_url = format_redirect_url(&record.redirect_uri, request_id, &record.state);
+    let authorized = AuthorizedNativeAuthorization {
         anchor_number,
         account_number,
         user_key: prepared.user_key,
         expiration: prepared.expiration,
+        code_expires_at: now.saturating_add(CODE_TTL_NS),
+        redeemed_at: None,
     };
 
     state::native_authorizations_mut(|native_authorizations| {
         native_authorizations.complete_claimed(
             request_id,
-            completed,
-            time().saturating_add(COMPLETED_REQUEST_GRACE_PERIOD_NS),
+            authorized,
+            now.saturating_add(COMPLETED_REQUEST_GRACE_PERIOD_NS),
         )
     })?;
 
     Ok(CompleteNativeAuthorizationResponse { redirect_url })
 }
 
-pub fn fetch(request_id: &str) -> FetchNativeDelegationResponse {
+pub async fn redeem_code(
+    request: RedeemNativeAuthorizationCodeRequest,
+) -> Result<RedeemNativeAuthorizationCodeResponse, RedeemNativeAuthorizationCodeError> {
+    validate_redeem_request(&request)?;
+    let registered_client = registered_client(&request.client_id)
+        .map_err(RedeemNativeAuthorizationCodeError::InvalidRequest)?;
     let now = time();
-    let Some(record) = state::native_authorizations(|native_authorizations| {
-        native_authorizations.get(request_id).cloned()
-    }) else {
-        return FetchNativeDelegationResponse::NotFound;
+    let record = state::native_authorizations_mut(|native_authorizations| {
+        native_authorizations.authorized_code(&request.code, now)
+    })?;
+    if record.redirect_uri != request.redirect_uri {
+        return Err(RedeemNativeAuthorizationCodeError::InvalidGrant(
+            "redirect_uri does not match the prepared request".to_string(),
+        ));
+    }
+    if record.client_id != request.client_id {
+        return Err(RedeemNativeAuthorizationCodeError::InvalidGrant(
+            "client_id does not match the prepared request".to_string(),
+        ));
+    }
+    if !registered_client
+        .redirect_uris
+        .iter()
+        .any(|redirect_uri| redirect_uri == &request.redirect_uri)
+    {
+        return Err(RedeemNativeAuthorizationCodeError::InvalidGrant(
+            "redirect_uri is not registered for client_id".to_string(),
+        ));
+    }
+    validate_pkce(
+        &record.code_challenge_method,
+        &record.code_challenge,
+        &request.code_verifier,
+    )?;
+
+    let access_token = random_token(TOKEN_NUM_BYTES).await.map_err(|err| {
+        RedeemNativeAuthorizationCodeError::InternalCanisterError(format!(
+            "failed to generate access token: {err}"
+        ))
+    })?;
+    let NativeAuthorizationStatus::Authorized(authorized) = record.status else {
+        return Err(RedeemNativeAuthorizationCodeError::InvalidGrant(
+            "authorization code is not ready".to_string(),
+        ));
     };
-    if record.expires_at <= now {
-        return FetchNativeDelegationResponse::Expired;
-    }
-    match record.status {
-        // InProgress stays internal, so polling keeps the existing pending-vs-signed contract.
-        NativeAuthorizationStatus::Pending | NativeAuthorizationStatus::InProgress(_) => {
-            FetchNativeDelegationResponse::Pending
-        }
-        NativeAuthorizationStatus::Completed(completed) => {
-            account_management::get_account_delegation(
-                completed.anchor_number,
-                &record.origin,
-                completed.account_number,
-                record.session_public_key,
-                completed.expiration,
-            )
-            .map(|signed_delegation| {
-                FetchNativeDelegationResponse::SignedDelegation(NativeSignedDelegation {
-                    user_key: completed.user_key,
-                    signed_delegation,
-                })
-            })
-            .unwrap_or(FetchNativeDelegationResponse::NotFound)
-        }
-    }
+    let token_record = NativeAccessTokenRecord {
+        request_id: request.code.clone(),
+        anchor_number: authorized.anchor_number,
+        account_number: authorized.account_number,
+        origin: record.origin.clone(),
+        session_public_key: record.session_public_key.clone(),
+        user_key: authorized.user_key.clone(),
+        expiration: authorized.expiration,
+        issuer: record.issuer.clone(),
+        client_id: record.client_id.clone(),
+        nonce: record.nonce.clone(),
+        scope: record.scope.clone(),
+        expires_at: now.saturating_add(ACCESS_TOKEN_TTL_NS),
+    };
+    let id_token = sign_id_token(
+        &record.issuer,
+        &record.client_id,
+        authorized.anchor_number,
+        &record.nonce,
+        now,
+        token_record.expires_at,
+    )
+    .await?;
+
+    state::native_authorizations_mut(|native_authorizations| {
+        native_authorizations.issue_access_token(
+            &request.code,
+            access_token.clone(),
+            token_record,
+            now,
+        )
+    })?;
+
+    Ok(RedeemNativeAuthorizationCodeResponse {
+        access_token,
+        token_type: native_token_type_uri(&record.issuer),
+        expires_in: nanos_to_secs(ACCESS_TOKEN_TTL_NS),
+        id_token,
+    })
 }
 
-fn validate_return_link(return_link: &str) -> Result<(), String> {
-    validate_https_url_like(return_link, "return link")
+pub fn exchange_delegation(
+    request: ExchangeNativeAccessTokenForDelegationRequest,
+) -> Result<
+    ExchangeNativeAccessTokenForDelegationResponse,
+    ExchangeNativeAccessTokenForDelegationError,
+> {
+    let token_record = state::native_authorizations_mut(|native_authorizations| {
+        native_authorizations.access_token(&request.access_token, time())
+    })?;
+    let signed_delegation = account_management::get_account_delegation(
+        token_record.anchor_number,
+        &token_record.origin,
+        token_record.account_number,
+        token_record.session_public_key,
+        token_record.expiration,
+    )
+    .map_err(|_| {
+        ExchangeNativeAccessTokenForDelegationError::InvalidToken(
+            "delegation is not available for the access token".to_string(),
+        )
+    })?;
+    Ok(ExchangeNativeAccessTokenForDelegationResponse {
+        user_key: token_record.user_key,
+        signed_delegation,
+        expiration: token_record.expiration,
+    })
+}
+
+pub fn openid_configuration_json() -> Result<Vec<u8>, String> {
+    let issuer = configured_issuer_origin();
+    let document = OpenIdConfiguration {
+        issuer: &issuer,
+        authorization_endpoint: format!("{issuer}/authorize"),
+        token_endpoint: format!("{issuer}/oauth2/token"),
+        ic_delegation_endpoint: format!("{issuer}/oauth2/delegation"),
+        jwks_uri: format!("{issuer}/oauth2/jwks"),
+        response_types_supported: vec!["code"],
+        grant_types_supported: vec!["authorization_code"],
+        subject_types_supported: vec!["pairwise"],
+        id_token_signing_alg_values_supported: vec!["RS256"],
+        code_challenge_methods_supported: vec!["S256"],
+        token_endpoint_auth_methods_supported: vec!["none"],
+    };
+    serde_json::to_vec(&document).map_err(|err| err.to_string())
+}
+
+pub fn jwks_json() -> Result<Vec<u8>, String> {
+    let key_pair = signing_key_pair_from_state()?;
+    let public_key = key_pair.to_public_key();
+    let document = JwksDocument {
+        keys: vec![JwkDocument {
+            kty: "RSA",
+            use_: "sig",
+            alg: "RS256",
+            kid: key_id(&public_key),
+            n: URL_SAFE_NO_PAD.encode(public_key.n().to_bytes_be()),
+            e: URL_SAFE_NO_PAD.encode(public_key.e().to_bytes_be()),
+        }],
+    };
+    serde_json::to_vec(&document).map_err(|err| err.to_string())
+}
+
+pub fn prime_signing_key_cache() -> Result<(), String> {
+    let _ = signing_key_pair_from_state()?;
+    Ok(())
+}
+
+pub fn validate_client_configs(configs: &[NativeOidcClientConfig]) -> Result<(), String> {
+    for config in configs {
+        validate_client_config(config)?;
+    }
+    Ok(())
+}
+
+pub fn validate_issuer_origin(issuer: &str) -> Result<(), String> {
+    canonicalize_native_origin_string(issuer)
+        .map(|_| ())
+        .map_err(|err| format!("native OIDC issuer origin {err}"))
+}
+
+fn validate_prepare_request(
+    request: &PrepareNativeAuthorizationRequest,
+) -> Result<RegisteredNativeClient, PrepareNativeAuthorizationError> {
+    validate_origin(&request.origin).map_err(PrepareNativeAuthorizationError::InvalidOrigin)?;
+    validate_ii_origin(&request.ii_origin)
+        .map_err(PrepareNativeAuthorizationError::InvalidOrigin)?;
+    validate_client_id(&request.client_id)
+        .map_err(PrepareNativeAuthorizationError::InvalidRequest)?;
+    validate_redirect_uri(&request.redirect_uri)
+        .map_err(PrepareNativeAuthorizationError::InvalidRedirectUri)?;
+    validate_scalar_field("state", &request.state, STATE_MAX_BYTES)
+        .map_err(PrepareNativeAuthorizationError::InvalidRequest)?;
+    validate_scopes(&request.scope).map_err(PrepareNativeAuthorizationError::InvalidRequest)?;
+    validate_scalar_field("nonce", &request.nonce, NONCE_MAX_BYTES)
+        .map_err(PrepareNativeAuthorizationError::InvalidRequest)?;
+    validate_code_challenge(&request.code_challenge)
+        .map_err(PrepareNativeAuthorizationError::InvalidRequest)?;
+    if request.code_challenge_method != "S256" {
+        return Err(PrepareNativeAuthorizationError::InvalidRequest(
+            "code_challenge_method must be `S256`".to_string(),
+        ));
+    }
+    if request.response_type != "code" {
+        return Err(PrepareNativeAuthorizationError::InvalidRequest(
+            "response_type must be `code`".to_string(),
+        ));
+    }
+    if request.response_mode != "query" {
+        return Err(PrepareNativeAuthorizationError::InvalidRequest(
+            "response_mode must be `query`".to_string(),
+        ));
+    }
+    let registered_client = registered_client(&request.client_id)
+        .map_err(PrepareNativeAuthorizationError::InvalidRequest)?;
+    if !registered_client
+        .redirect_uris
+        .iter()
+        .any(|redirect_uri| redirect_uri == &request.redirect_uri)
+    {
+        return Err(PrepareNativeAuthorizationError::InvalidRedirectUri(
+            "redirect_uri is not registered for client_id".to_string(),
+        ));
+    }
+    let redirect_kind = parse_redirect_uri(&request.redirect_uri)
+        .map_err(PrepareNativeAuthorizationError::InvalidRedirectUri)?;
+    if let RedirectUriKind::ClaimedHttps(redirect_origin) = redirect_kind {
+        let origin = canonicalize_native_origin(&request.origin)
+            .map_err(PrepareNativeAuthorizationError::InvalidOrigin)?;
+        if redirect_origin != origin {
+            return Err(PrepareNativeAuthorizationError::InvalidRedirectUri(
+                "claimed https redirect_uri must match origin".to_string(),
+            ));
+        }
+    }
+    let origin = canonicalize_native_origin_string(&request.origin)
+        .map_err(PrepareNativeAuthorizationError::InvalidOrigin)?;
+    if !registered_client
+        .allowed_origins
+        .iter()
+        .any(|allowed_origin| allowed_origin == &origin)
+    {
+        return Err(PrepareNativeAuthorizationError::InvalidOrigin(
+            "origin is not registered for client_id".to_string(),
+        ));
+    }
+    Ok(registered_client)
+}
+
+fn validate_redeem_request(
+    request: &RedeemNativeAuthorizationCodeRequest,
+) -> Result<(), RedeemNativeAuthorizationCodeError> {
+    if request.grant_type != "authorization_code" {
+        return Err(RedeemNativeAuthorizationCodeError::UnsupportedGrantType(
+            "grant_type must be `authorization_code`".to_string(),
+        ));
+    }
+    validate_redirect_uri(&request.redirect_uri)
+        .map_err(RedeemNativeAuthorizationCodeError::InvalidRequest)?;
+    validate_client_id(&request.client_id)
+        .map_err(RedeemNativeAuthorizationCodeError::InvalidRequest)?;
+    validate_code_challenge(&request.code_verifier)
+        .map_err(RedeemNativeAuthorizationCodeError::InvalidRequest)?;
+    Ok(())
+}
+
+fn validate_origin(origin: &str) -> Result<(), String> {
+    if origin.len() > ORIGIN_MAX_BYTES {
+        return Err(format!("origin must not exceed {ORIGIN_MAX_BYTES} bytes"));
+    }
+    canonicalize_native_origin(origin).map(|_| ())
+}
+
+fn validate_client_id(client_id: &str) -> Result<(), String> {
+    validate_scalar_field("client_id", client_id, CLIENT_ID_MAX_BYTES)?;
+    if !client_id.bytes().all(|byte| byte.is_ascii_graphic()) {
+        return Err("client_id must use visible ASCII characters".to_string());
+    }
+    Ok(())
+}
+
+fn validate_client_config(config: &NativeOidcClientConfig) -> Result<(), String> {
+    if config.application_type != NativeOidcApplicationType::Native {
+        return Err("native OIDC client must use application_type `native`".to_string());
+    }
+    if config.token_endpoint_auth_method != NativeOidcTokenEndpointAuthMethod::None {
+        return Err("native OIDC client must use token_endpoint_auth_method `none`".to_string());
+    }
+    if !config.require_pkce {
+        return Err("native OIDC client must require PKCE".to_string());
+    }
+    validate_client_id(&config.client_id)?;
+    if config.redirect_uris.is_empty() {
+        return Err("native OIDC client must define at least one redirect_uri".to_string());
+    }
+    if config.allowed_origins.is_empty() {
+        return Err("native OIDC client must define at least one allowed_origin".to_string());
+    }
+    for redirect_uri in &config.redirect_uris {
+        parse_redirect_uri(redirect_uri)?;
+    }
+    for allowed_origin in &config.allowed_origins {
+        canonicalize_native_origin_string(allowed_origin)?;
+    }
+    Ok(())
+}
+
+fn validate_scopes(scope: &[String]) -> Result<(), String> {
+    if !scope.iter().any(|value| value == "openid") {
+        return Err("scope must include `openid`".to_string());
+    }
+    if scope.is_empty() {
+        return Err("scope must not be empty".to_string());
+    }
+    Ok(())
+}
+
+fn validate_scalar_field(field_name: &str, value: &str, max_len: usize) -> Result<(), String> {
+    if value.is_empty() {
+        return Err(format!("{field_name} must not be empty"));
+    }
+    if value.len() > max_len {
+        return Err(format!("{field_name} must not exceed {max_len} bytes"));
+    }
+    if value.bytes().any(|byte| byte <= b' ') {
+        return Err(format!("{field_name} must not contain control characters"));
+    }
+    Ok(())
+}
+
+fn validate_code_challenge(value: &str) -> Result<(), String> {
+    validate_scalar_field("code challenge", value, PKCE_MAX_BYTES)?;
+    if !value
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || b"-._~".contains(&byte))
+    {
+        return Err("code challenge must use unreserved URI characters".to_string());
+    }
+    Ok(())
+}
+
+fn validate_pkce(
+    method: &str,
+    expected_challenge: &str,
+    verifier: &str,
+) -> Result<(), RedeemNativeAuthorizationCodeError> {
+    if method != "S256" {
+        return Err(RedeemNativeAuthorizationCodeError::InvalidGrant(
+            "unsupported code challenge method".to_string(),
+        ));
+    }
+    let actual = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
+    if actual != expected_challenge {
+        return Err(RedeemNativeAuthorizationCodeError::InvalidGrant(
+            "code_verifier does not match code_challenge".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_redirect_uri(redirect_uri: &str) -> Result<(), String> {
+    parse_redirect_uri(redirect_uri).map(|_| ())
+}
+
+fn parse_redirect_uri(redirect_uri: &str) -> Result<RedirectUriKind, String> {
+    if redirect_uri.is_empty() {
+        return Err("redirect_uri must not be empty".to_string());
+    }
+    if redirect_uri.len() > LOOPBACK_URL_MAX_BYTES {
+        return Err(format!(
+            "redirect_uri must not exceed {LOOPBACK_URL_MAX_BYTES} bytes"
+        ));
+    }
+    if redirect_uri.contains('#') || redirect_uri.contains('?') {
+        return Err("redirect_uri must not contain query or fragment".to_string());
+    }
+    if redirect_uri.bytes().any(|byte| byte <= b' ') {
+        return Err("redirect_uri must not contain control characters".to_string());
+    }
+    if redirect_uri.starts_with("https://") {
+        let origin = canonicalize_https_origin_components(
+            extract_https_authority(redirect_uri)?,
+            "redirect_uri",
+        )?;
+        return Ok(RedirectUriKind::ClaimedHttps(origin));
+    }
+    if redirect_uri.starts_with("http://") {
+        validate_loopback_redirect_uri(redirect_uri)?;
+        return Ok(RedirectUriKind::Loopback);
+    }
+    validate_private_scheme_redirect_uri(redirect_uri)?;
+    Ok(RedirectUriKind::PrivateScheme)
+}
+
+fn validate_private_scheme_redirect_uri(redirect_uri: &str) -> Result<(), String> {
+    let (scheme, path) = redirect_uri
+        .split_once(':')
+        .ok_or_else(|| "private-use redirect_uri must include a scheme".to_string())?;
+    if scheme.is_empty() || scheme.len() > ORIGIN_MAX_BYTES {
+        return Err("private-use redirect_uri scheme is invalid".to_string());
+    }
+    if !is_reverse_domain_scheme(scheme) {
+        return Err("private-use redirect_uri scheme must use reverse-domain notation".to_string());
+    }
+    if !path.starts_with('/') || path.starts_with("//") || path.len() == 1 {
+        return Err("private-use redirect_uri must use single-slash path form".to_string());
+    }
+    Ok(())
+}
+
+fn validate_loopback_redirect_uri(redirect_uri: &str) -> Result<(), String> {
+    let remainder = redirect_uri
+        .strip_prefix("http://")
+        .ok_or_else(|| "loopback redirect_uri must start with http://".to_string())?;
+    let authority = remainder.split('/').next().unwrap_or_default();
+    if authority.is_empty() {
+        return Err("loopback redirect_uri must include a host".to_string());
+    }
+    let (host, port) = split_host_and_port(authority)
+        .ok_or_else(|| "loopback redirect_uri must include a valid host and port".to_string())?;
+    if !matches!(host, "127.0.0.1" | "localhost" | "[::1]") {
+        return Err(
+            "loopback redirect_uri host must be localhost, 127.0.0.1, or [::1]".to_string(),
+        );
+    }
+    validate_port(port, "loopback redirect_uri")?;
+    if !remainder.contains('/') {
+        return Err("loopback redirect_uri must include a path".to_string());
+    }
+    Ok(())
+}
+
+fn is_reverse_domain_scheme(scheme: &str) -> bool {
+    let mut parts = scheme.split('.');
+    let count = parts.clone().count();
+    count >= 2
+        && parts.all(|part| {
+            !part.is_empty()
+                && part
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        })
 }
 
 fn validate_ii_origin(ii_origin: &str) -> Result<(), String> {
     validate_https_url_like(ii_origin, "ii origin")
-}
-
-fn validate_native_origin_matches_return_link(
-    origin: &str,
-    return_link: &str,
-) -> Result<(), String> {
-    let origin = canonicalize_native_origin(origin)?;
-    let return_link_origin = canonicalize_return_link_origin(return_link)?;
-    if origin != return_link_origin {
-        return Err("origin must match return link origin".to_string());
-    }
-    Ok(())
 }
 
 fn validate_https_url_like(url: &str, field_name: &str) -> Result<(), String> {
@@ -218,21 +686,13 @@ fn validate_https_url_like(url: &str, field_name: &str) -> Result<(), String> {
     if !url.starts_with("https://") {
         return Err(format!("{field_name} must start with `https://`"));
     }
-    if url.contains('?') {
-        return Err(format!("{field_name} must not contain '?'"));
-    }
-    if url.contains('#') {
-        return Err(format!("{field_name} must not contain '#'"));
+    if url.contains('?') || url.contains('#') {
+        return Err(format!("{field_name} must not contain query or fragment"));
     }
     if url.bytes().any(|byte| byte <= b' ') {
         return Err(format!("{field_name} must not contain control characters"));
     }
-
-    let remainder = &url["https://".len()..];
-    let authority = remainder.split('/').next().unwrap_or_default();
-    if authority.is_empty() {
-        return Err(format!("{field_name} must include a host"));
-    }
+    let authority = extract_https_authority(url)?;
     if authority.contains('@') {
         return Err(format!("{field_name} must not include userinfo"));
     }
@@ -240,12 +700,19 @@ fn validate_https_url_like(url: &str, field_name: &str) -> Result<(), String> {
         .ok_or_else(|| format!("{field_name} must include a valid host"))?;
     validate_host(host, field_name)?;
     validate_port(port, field_name)?;
-
     Ok(())
 }
 
-fn canonicalize_return_link_origin(return_link: &str) -> Result<CanonicalOrigin, String> {
-    canonicalize_https_origin_components(extract_https_authority(return_link)?, "return link")
+fn canonicalize_native_origin_string(origin: &str) -> Result<String, String> {
+    let canonical = canonicalize_native_origin(origin)?;
+    if canonical.port == 443 {
+        Ok(format!("{}://{}", canonical.scheme, canonical.host))
+    } else {
+        Ok(format!(
+            "{}://{}:{}",
+            canonical.scheme, canonical.host, canonical.port
+        ))
+    }
 }
 
 fn canonicalize_native_origin(origin: &str) -> Result<CanonicalOrigin, String> {
@@ -256,22 +723,10 @@ fn canonicalize_native_origin(origin: &str) -> Result<CanonicalOrigin, String> {
     if scheme != "https" {
         return Err("origin must use https".to_string());
     }
-    canonicalize_origin_components(scheme, authority, "origin")
-}
-
-fn canonicalize_native_origin_string(origin: &str) -> Result<String, String> {
-    canonicalize_origin(canonicalize_native_origin(origin)?)
-}
-
-fn extract_https_authority(url: &str) -> Result<&str, String> {
-    let remainder = url
-        .strip_prefix("https://")
-        .ok_or_else(|| "return link must start with `https://`".to_string())?;
-    let authority = remainder.split('/').next().unwrap_or_default();
-    if authority.is_empty() {
-        return Err("return link must include a host".to_string());
+    if authority.contains('/') || authority.contains('?') || authority.contains('#') {
+        return Err("origin must not contain path, query, or fragment".to_string());
     }
-    Ok(authority)
+    canonicalize_origin_components(scheme, authority, "origin")
 }
 
 fn canonicalize_https_origin_components(
@@ -286,331 +741,326 @@ fn canonicalize_origin_components(
     authority: &str,
     field_name: &str,
 ) -> Result<CanonicalOrigin, String> {
+    if authority.is_empty() {
+        return Err(format!("{field_name} must include a host"));
+    }
     if authority.contains('@') {
         return Err(format!("{field_name} must not include userinfo"));
     }
     let (host, port) = split_host_and_port(authority)
         .ok_or_else(|| format!("{field_name} must include a valid host"))?;
     validate_host(host, field_name)?;
-    validate_port(port, field_name)?;
+    let port = validate_port(port, field_name)?;
     Ok(CanonicalOrigin {
         scheme,
         host: host.to_ascii_lowercase(),
-        port: port
-            .map(|port| port.parse::<u16>().expect("validated port should parse"))
-            .unwrap_or(HTTPS_DEFAULT_PORT),
+        port,
     })
 }
 
-fn canonicalize_origin(origin: CanonicalOrigin) -> Result<String, String> {
-    let host = if origin.host.contains(':') {
-        format!("[{}]", origin.host)
-    } else {
-        origin.host
-    };
-    if origin.port == HTTPS_DEFAULT_PORT {
-        Ok(format!("{}://{host}", origin.scheme))
-    } else {
-        Ok(format!("{}://{host}:{}", origin.scheme, origin.port))
+fn extract_https_authority(url: &str) -> Result<&str, String> {
+    let remainder = url
+        .strip_prefix("https://")
+        .ok_or_else(|| "url must start with https://".to_string())?;
+    let authority = remainder.split('/').next().unwrap_or_default();
+    if authority.is_empty() {
+        return Err("url must include a host".to_string());
     }
+    Ok(authority)
+}
+
+fn split_host_and_port(authority: &str) -> Option<(&str, Option<u16>)> {
+    if authority.starts_with('[') {
+        let end = authority.find(']')?;
+        let host = &authority[..=end];
+        let remainder = &authority[end + 1..];
+        if remainder.is_empty() {
+            return Some((host, None));
+        }
+        let port = remainder.strip_prefix(':')?.parse().ok()?;
+        return Some((host, Some(port)));
+    }
+    let (host, port) = match authority.rsplit_once(':') {
+        Some((host, port)) if !host.contains(':') => (host, Some(port.parse().ok()?)),
+        _ => (authority, None),
+    };
+    Some((host, port))
 }
 
 fn validate_host(host: &str, field_name: &str) -> Result<(), String> {
     if host.is_empty() {
         return Err(format!("{field_name} must include a host"));
     }
-    if host == "." || host == ".." {
-        return Err(format!("{field_name} must include a valid host"));
-    }
-    if host.starts_with('.') || host.ends_with('.') {
-        return Err(format!("{field_name} must include a valid host"));
-    }
-    Ok(())
-}
-
-fn split_host_and_port(authority: &str) -> Option<(&str, Option<&str>)> {
-    if let Some(stripped) = authority.strip_prefix('[') {
-        let (host, remainder) = stripped.split_once(']')?;
-        if remainder.is_empty() {
-            return Some((host, None));
+    if host.starts_with('[') && host.ends_with(']') {
+        if host != "[::1]" {
+            return Err(format!(
+                "{field_name} only supports loopback IPv6 host [::1]"
+            ));
         }
-        let port = remainder.strip_prefix(':')?;
-        return Some((host, Some(port)));
-    }
-    match authority.split_once(':') {
-        Some((host, port)) => Some((host, Some(port))),
-        None => Some((authority, None)),
-    }
-}
-
-fn validate_port(port: Option<&str>, field_name: &str) -> Result<(), String> {
-    let Some(port) = port else {
         return Ok(());
-    };
-    if port.is_empty() {
-        return Err(format!("{field_name} must include a valid port"));
     }
-    if !port.bytes().all(|byte| byte.is_ascii_digit()) {
-        return Err(format!("{field_name} must include a valid port"));
+    if host
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'.' || byte == b'-')
+    {
+        return Ok(());
     }
-    let parsed_port = port
-        .parse::<u16>()
-        .map_err(|_| format!("{field_name} must include a valid port"))?;
-    if parsed_port == 0 {
-        return Err(format!("{field_name} must include a valid port"));
-    }
-    Ok(())
+    Err(format!("{field_name} must include a valid host"))
 }
 
-fn validate_origin(origin: &str) -> Result<(), String> {
-    if origin.is_empty() {
-        return Err("origin must not be empty".to_string());
-    }
-    if origin.len() > ORIGIN_MAX_BYTES {
-        return Err(format!("origin must not exceed {ORIGIN_MAX_BYTES} bytes"));
-    }
-    if origin.bytes().any(|byte| byte <= b' ') {
-        return Err("origin must not contain control characters".to_string());
-    }
-    if origin.contains('?') {
-        return Err("origin must not contain '?'".to_string());
-    }
-    if origin.contains('#') {
-        return Err("origin must not contain '#'".to_string());
-    }
-
-    let (scheme, authority) = origin
-        .split_once("://")
-        .ok_or_else(|| "origin must include a scheme".to_string())?;
-    validate_scheme(scheme)?;
-    if authority.is_empty() {
-        return Err("origin must include a host".to_string());
-    }
-    if authority.contains('/') {
-        return Err("origin must not include a path".to_string());
-    }
-    if authority.contains('@') {
-        return Err("origin must not include userinfo".to_string());
-    }
-    let (host, port) = split_host_and_port(authority)
-        .ok_or_else(|| "origin must include a valid host".to_string())?;
-    validate_host(host, "origin")?;
-    validate_port(port, "origin")?;
-    Ok(())
-}
-
-fn validate_scheme(scheme: &str) -> Result<(), String> {
-    let mut bytes = scheme.bytes();
-    let Some(first) = bytes.next() else {
-        return Err("origin must include a scheme".to_string());
-    };
-    if !first.is_ascii_alphabetic() {
-        return Err("origin must include a valid scheme".to_string());
-    }
-    if !bytes.all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'-' | b'.')) {
-        return Err("origin must include a valid scheme".to_string());
-    }
-    Ok(())
-}
-
-async fn random_request_id() -> Result<String, String> {
-    let randomness = crate::random_salt().await;
-    Ok(URL_SAFE_NO_PAD.encode(&randomness[..REQUEST_ID_NUM_BYTES]))
-}
-
-fn map_authz_err(err: crate::authz_utils::AuthorizationError) -> CompleteNativeAuthorizationError {
-    CompleteNativeAuthorizationError::Unauthorized(err.principal)
-}
-
-fn map_identity_update_err(err: IdentityUpdateError) -> CompleteNativeAuthorizationError {
-    match err {
-        IdentityUpdateError::Unauthorized(principal) => {
-            CompleteNativeAuthorizationError::Unauthorized(principal)
-        }
-        IdentityUpdateError::StorageError(_, storage_error) => {
-            CompleteNativeAuthorizationError::InternalCanisterError(storage_error.to_string())
-        }
+fn validate_port(port: Option<u16>, field_name: &str) -> Result<u16, String> {
+    match port {
+        Some(0) => Err(format!("{field_name} must include a valid port")),
+        Some(port) => Ok(port),
+        None => Ok(443),
     }
 }
 
-fn release_completion_claim(request_id: &str) {
-    state::native_authorizations_mut(|native_authorizations| {
-        native_authorizations.release_claim(request_id);
+fn format_redirect_url(redirect_uri: &str, code: &str, state: &str) -> String {
+    let code = percent_encode_query_value(code);
+    let state = percent_encode_query_value(state);
+    format!("{redirect_uri}?code={code}&state={state}")
+}
+
+fn native_token_type_uri(issuer: &str) -> String {
+    format!("{}{}", issuer.trim_end_matches('/'), TOKEN_TYPE_SEGMENT)
+}
+
+fn configured_issuer_origin() -> String {
+    state::persistent_state(|persistent_state| {
+        persistent_state
+            .native_oidc_issuer_origin
+            .clone()
+            .unwrap_or_else(|| DEFAULT_NATIVE_OIDC_ISSUER_ORIGIN.to_string())
+    })
+}
+
+async fn sign_id_token(
+    issuer: &str,
+    client_id: &str,
+    anchor_number: u64,
+    nonce: &str,
+    issued_at_ns: u64,
+    expires_at_ns: u64,
+) -> Result<String, RedeemNativeAuthorizationCodeError> {
+    state::ensure_salt_set().await;
+    let private_key = signing_key_pair_from_state()
+        .map_err(RedeemNativeAuthorizationCodeError::InternalCanisterError)?;
+    let public_key = private_key.to_public_key();
+    let header = serde_json::json!({
+        "alg": "RS256",
+        "typ": "JWT",
+        "kid": key_id(&public_key),
     });
+    let pairwise_sub = pairwise_subject(issuer, client_id, anchor_number);
+    let claims = IdTokenClaims {
+        iss: issuer,
+        sub: pairwise_sub,
+        aud: client_id,
+        exp: nanos_to_secs(expires_at_ns),
+        iat: nanos_to_secs(issued_at_ns),
+        auth_time: nanos_to_secs(issued_at_ns),
+        nonce,
+    };
+    let encoded_header = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&header).map_err(|err| {
+        RedeemNativeAuthorizationCodeError::InternalCanisterError(err.to_string())
+    })?);
+    let encoded_claims = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&claims).map_err(|err| {
+        RedeemNativeAuthorizationCodeError::InternalCanisterError(err.to_string())
+    })?);
+    let signing_input = format!("{encoded_header}.{encoded_claims}");
+    let signing_key = SigningKey::<Sha256>::new(private_key);
+    let signature = signing_key.sign(signing_input.as_bytes());
+    Ok(format!(
+        "{signing_input}.{}",
+        URL_SAFE_NO_PAD.encode(signature.to_vec())
+    ))
+}
+
+fn pairwise_subject(issuer: &str, client_id: &str, anchor_number: u64) -> String {
+    pairwise_subject_with_salt(state::salt(), issuer, client_id, anchor_number)
+}
+
+fn pairwise_subject_with_salt(
+    salt: [u8; 32],
+    issuer: &str,
+    client_id: &str,
+    anchor_number: u64,
+) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(salt);
+    hasher.update([0u8]);
+    hasher.update(issuer.as_bytes());
+    hasher.update([0u8]);
+    hasher.update(client_id.as_bytes());
+    hasher.update([0u8]);
+    hasher.update(anchor_number.to_be_bytes());
+    URL_SAFE_NO_PAD.encode(hasher.finalize())
+}
+
+fn registered_client(client_id: &str) -> Result<RegisteredNativeClient, String> {
+    let Some(config) = state::persistent_state(|persistent_state| {
+        persistent_state
+            .native_oidc_clients
+            .as_ref()
+            .and_then(|configs| {
+                configs
+                    .iter()
+                    .find(|config| config.client_id == client_id)
+                    .cloned()
+            })
+    }) else {
+        return Err("client_id is not registered".to_string());
+    };
+    validate_client_config(&config)?;
+    let allowed_origins = config
+        .allowed_origins
+        .iter()
+        .map(|origin| canonicalize_native_origin_string(origin))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(RegisteredNativeClient {
+        client_id: config.client_id,
+        redirect_uris: config.redirect_uris,
+        allowed_origins,
+    })
+}
+
+fn signing_key_pair_from_state() -> Result<RsaPrivateKey, String> {
+    let maybe_cached = SIGNING_KEY_CACHE.with(|cache| cache.borrow().clone());
+    if let Some(private_key) = maybe_cached {
+        return Ok(private_key);
+    }
+    let salt = state::storage_borrow(|storage| storage.salt().cloned())
+        .ok_or_else(|| "salt is not initialized".to_string())?;
+    let private_key = signing_key_pair_from_salt(&salt)?;
+    SIGNING_KEY_CACHE.with(|cache| {
+        cache.replace(Some(private_key.clone()));
+    });
+    Ok(private_key)
+}
+
+fn signing_key_pair_from_salt(salt: &[u8; 32]) -> Result<RsaPrivateKey, String> {
+    let mut seed = [0u8; 32];
+    seed.copy_from_slice(&Sha256::digest(
+        [salt.as_slice(), b"native-oidc-signing-key"].concat(),
+    ));
+    let mut rng = ChaCha20Rng::from_seed(seed);
+    RsaPrivateKey::new(&mut rng, 2048).map_err(|err| err.to_string())
+}
+
+fn key_id(public_key: &rsa::RsaPublicKey) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(public_key.n().to_bytes_be());
+    hasher.update(public_key.e().to_bytes_be());
+    URL_SAFE_NO_PAD.encode(hasher.finalize())
+}
+
+fn nanos_to_secs(value: u64) -> u64 {
+    value / 1_000_000_000
+}
+
+fn percent_encode_query_value(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
+            encoded.push(char::from(byte));
+        } else {
+            encoded.push('%');
+            encoded.push(char::from(b"0123456789ABCDEF"[(byte >> 4) as usize]));
+            encoded.push(char::from(b"0123456789ABCDEF"[(byte & 0x0f) as usize]));
+        }
+    }
+    encoded
+}
+
+async fn random_token(num_bytes: usize) -> Result<String, String> {
+    let mut bytes = vec![0; num_bytes];
+    ic_cdk::api::management_canister::main::raw_rand()
+        .await
+        .map_err(|(code, msg)| format!("raw_rand failed ({code:?}): {msg}"))?
+        .0
+        .iter()
+        .cycle()
+        .zip(bytes.iter_mut())
+        .for_each(|(source, target)| *target = *source);
+    Ok(URL_SAFE_NO_PAD.encode(bytes))
 }
 
 fn release_claim_on_error<T>(
     result: Result<T, CompleteNativeAuthorizationError>,
     request_id: &str,
 ) -> Result<T, CompleteNativeAuthorizationError> {
-    match result {
-        Ok(value) => Ok(value),
-        Err(err) => {
-            release_completion_claim(request_id);
-            Err(err)
+    if result.is_err() {
+        state::native_authorizations_mut(|native_authorizations| {
+            native_authorizations.release_claim(request_id);
+        });
+    }
+    result
+}
+
+fn map_authz_err(
+    error: crate::authz_utils::AuthorizationError,
+) -> CompleteNativeAuthorizationError {
+    CompleteNativeAuthorizationError::Unauthorized(error.principal)
+}
+
+fn map_identity_update_err(error: IdentityUpdateError) -> CompleteNativeAuthorizationError {
+    match error {
+        IdentityUpdateError::Unauthorized(principal) => {
+            CompleteNativeAuthorizationError::Unauthorized(principal)
+        }
+        IdentityUpdateError::StorageError(_, err) => {
+            CompleteNativeAuthorizationError::InternalCanisterError(err.to_string())
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        canonicalize_native_origin_string, canonicalize_return_link_origin, validate_ii_origin,
-        validate_native_origin_matches_return_link, validate_origin, validate_return_link,
-    };
+    use super::*;
 
     #[test]
-    fn should_reject_invalid_return_links() {
-        for return_link in [
-            "",
-            "http://example.com",
-            "https://",
-            "https:///callback",
-            "https://example.com?foo=bar",
-            "https://example.com#foo",
-            "https://example.com\nnext",
-            "https://user@example.com/callback",
-        ] {
-            assert!(validate_return_link(return_link).is_err());
-        }
+    fn should_derive_stable_pairwise_subject_per_client() {
+        let salt = [7u8; 32];
+        let issuer = "https://identity.internetcomputer.org";
+        let subject_a = pairwise_subject_with_salt(salt, issuer, "com.example.app", 42);
+        let subject_a_second = pairwise_subject_with_salt(salt, issuer, "com.example.app", 42);
+        let subject_b = pairwise_subject_with_salt(salt, issuer, "com.example.wallet", 42);
+
+        assert_eq!(subject_a, subject_a_second);
+        assert_ne!(subject_a, subject_b);
     }
 
     #[test]
-    fn should_accept_https_return_link_without_query_or_fragment() {
-        assert!(validate_return_link("https://example.com/native/return").is_ok());
+    fn should_validate_native_oidc_allowed_origins() {
+        let valid = NativeOidcClientConfig {
+            client_id: "com.example.app".to_string(),
+            redirect_uris: vec!["com.example.app:/oauth2redirect/ii".to_string()],
+            allowed_origins: vec!["https://app.example.com".to_string()],
+            application_type: NativeOidcApplicationType::Native,
+            token_endpoint_auth_method: NativeOidcTokenEndpointAuthMethod::None,
+            require_pkce: true,
+        };
+        assert!(validate_client_config(&valid).is_ok());
+
+        let mut invalid = valid.clone();
+        invalid.allowed_origins = vec![];
+        assert!(validate_client_config(&invalid).is_err());
+
+        let mut invalid = valid.clone();
+        invalid.allowed_origins = vec!["http://app.example.com".to_string()];
+        assert!(validate_client_config(&invalid).is_err());
+
+        let mut invalid = valid;
+        invalid.allowed_origins = vec!["https://app.example.com/callback".to_string()];
+        assert!(validate_client_config(&invalid).is_err());
     }
 
     #[test]
-    fn should_reject_invalid_ii_origins() {
-        for ii_origin in [
-            "",
-            "http://example.com",
-            "https://",
-            "https:///authorize",
-            "https://identity.test:notaport",
-            "https://identity.test:",
-            "https://identity.test:99999",
-            "https://[::1]:notaport",
-            "https://example.com?foo=bar",
-            "https://example.com#foo",
-            "https://example.com\nnext",
-            "https://user@identity.example.com",
-        ] {
-            assert!(validate_ii_origin(ii_origin).is_err());
-        }
-    }
-
-    #[test]
-    fn should_accept_valid_ii_origin() {
-        assert!(validate_ii_origin("https://identity.example.com").is_ok());
-        assert!(validate_ii_origin("https://identity.example.com:4943").is_ok());
-        assert!(validate_ii_origin("https://[::1]:4943").is_ok());
-    }
-
-    #[test]
-    fn should_reject_invalid_return_link_ports() {
-        for return_link in [
-            "https://app.example.com:notaport/callback",
-            "https://app.example.com:/callback",
-            "https://app.example.com:99999/callback",
-            "https://[::1]:notaport/callback",
-        ] {
-            assert!(validate_return_link(return_link).is_err());
-        }
-    }
-
-    #[test]
-    fn should_accept_valid_return_link_ports() {
-        assert!(validate_return_link("https://app.example.com:443/callback").is_ok());
-        assert!(validate_return_link("https://[::1]:4943/callback").is_ok());
-    }
-
-    #[test]
-    fn should_accept_matching_native_origin_and_return_link_origin() {
-        assert!(validate_native_origin_matches_return_link(
-            "https://app.example.com",
-            "https://app.example.com/callback"
-        )
-        .is_ok());
-        assert!(validate_native_origin_matches_return_link(
-            "https://app.example.com",
-            "https://app.example.com:443/callback"
-        )
-        .is_ok());
-    }
-
-    #[test]
-    fn should_reject_non_matching_native_origin_and_return_link_origin() {
-        for (origin, return_link) in [
-            (
-                "https://app.example.com",
-                "https://other.example.com/callback",
-            ),
-            (
-                "https://app.example.com:8443",
-                "https://app.example.com/callback",
-            ),
-            ("http://app.example.com", "https://app.example.com/callback"),
-        ] {
-            assert!(validate_native_origin_matches_return_link(origin, return_link).is_err());
-        }
-    }
-
-    #[test]
-    fn should_canonicalize_return_link_origin() {
-        assert_eq!(
-            canonicalize_return_link_origin("https://App.Example.com:443/callback").unwrap(),
-            super::CanonicalOrigin {
-                scheme: "https".to_string(),
-                host: "app.example.com".to_string(),
-                port: 443,
-            }
-        );
-    }
-
-    #[test]
-    fn should_canonicalize_native_origin_string() {
-        assert_eq!(
-            canonicalize_native_origin_string("https://App.Example.com:443").unwrap(),
-            "https://app.example.com"
-        );
-        assert_eq!(
-            canonicalize_native_origin_string("https://[::1]:4943").unwrap(),
-            "https://[::1]:4943"
-        );
-    }
-
-    #[test]
-    fn should_reject_invalid_origins() {
-        for origin in [
-            "",
-            "not-an-origin",
-            "https://",
-            "https:///callback",
-            "https://example.com/path",
-            "https://example.com?x=1",
-            "https://example.com#x",
-            "https://example.com\nnext",
-            "https://example.com:notaport",
-            "https://example.com:99999",
-            "https://example.com:0",
-            "https://user@example.com",
-        ] {
-            assert!(validate_origin(origin).is_err());
-        }
-        assert!(validate_origin(&"a".repeat(256)).is_err());
-    }
-
-    #[test]
-    fn should_accept_valid_origins() {
-        for origin in [
-            "https://example.com",
-            "https://example.com:443",
-            "http://localhost:4943",
-            "chrome-extension://abcdef",
-            "https://[::1]:4943",
-        ] {
-            assert!(validate_origin(origin).is_ok());
-        }
+    fn should_reject_issuer_origins_with_path() {
+        assert!(validate_issuer_origin("https://identity.ic0.app").is_ok());
+        assert!(validate_issuer_origin("https://identity.ic0.app:443").is_ok());
+        assert!(validate_issuer_origin("https://identity.ic0.app/").is_err());
+        assert!(validate_issuer_origin("https://identity.ic0.app/path").is_err());
     }
 }

@@ -1,48 +1,135 @@
-//! Tests for native authorization request lifecycle.
+//! Tests for native OAuth-style browser authorization.
 
-use candid::Principal;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
 use canister_tests::api::internet_identity as api;
 use canister_tests::flows;
 use canister_tests::framework::*;
+use ic_cdk::api::management_canister::main::CanisterId;
 use internet_identity_interface::internet_identity::types::*;
 use pocket_ic::RejectResponse;
+use serde::Deserialize;
 use serde_bytes::ByteBuf;
+use sha2::{Digest, Sha256};
 use std::time::Duration;
 
 const NATIVE_REQUEST_TTL_SECS: u64 = 5 * 60;
-const COMPLETED_REQUEST_GRACE_PERIOD_SECS: u64 = 5 * 60;
+const DEFAULT_TRUSTED_ISSUER_ORIGIN: &str = "https://identity.internetcomputer.org";
 
 fn native_request() -> PrepareNativeAuthorizationRequest {
+    let verifier = "native-pkce-verifier";
     PrepareNativeAuthorizationRequest {
         origin: "https://app.example.com".to_string(),
         ii_origin: "https://identity.test".to_string(),
         session_public_key: ByteBuf::from("native session key"),
-        return_link: "https://app.example.com/callback".to_string(),
+        redirect_uri: "https://app.example.com/callback".to_string(),
+        client_id: "com.example.app".to_string(),
+        state: "state-123".to_string(),
+        scope: vec!["openid".to_string()],
+        nonce: "nonce-123".to_string(),
+        code_challenge: URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes())),
+        code_challenge_method: "S256".to_string(),
+        response_type: "code".to_string(),
+        response_mode: "query".to_string(),
         max_time_to_live: None,
     }
 }
 
-fn device_last_used(anchor_info: &IdentityAnchorInfo, device_key: &DeviceKey) -> Option<Timestamp> {
-    anchor_info
-        .devices
-        .iter()
-        .find(|device| &device.pubkey == device_key)
-        .and_then(|device| device.last_usage)
+fn redeem_request(
+    code: &str,
+    redirect_uri: &str,
+    client_id: &str,
+) -> RedeemNativeAuthorizationCodeRequest {
+    RedeemNativeAuthorizationCodeRequest {
+        grant_type: "authorization_code".to_string(),
+        code: code.to_string(),
+        redirect_uri: redirect_uri.to_string(),
+        code_verifier: "native-pkce-verifier".to_string(),
+        client_id: client_id.to_string(),
+    }
+}
+
+fn native_client_config(client_id: &str, redirect_uris: Vec<String>) -> NativeOidcClientConfig {
+    NativeOidcClientConfig {
+        client_id: client_id.to_string(),
+        redirect_uris,
+        allowed_origins: vec!["https://app.example.com".to_string()],
+        application_type: NativeOidcApplicationType::Native,
+        token_endpoint_auth_method: NativeOidcTokenEndpointAuthMethod::None,
+        require_pkce: true,
+    }
+}
+
+fn install_native_oidc_ii(
+    env: &pocket_ic::PocketIc,
+    clients: Vec<NativeOidcClientConfig>,
+) -> CanisterId {
+    install_native_oidc_ii_with_issuer(env, clients, None)
+}
+
+fn install_native_oidc_ii_with_issuer(
+    env: &pocket_ic::PocketIc,
+    clients: Vec<NativeOidcClientConfig>,
+    issuer_origin: Option<&str>,
+) -> CanisterId {
+    let mut init_arg = arg_with_wasm_hash(ARCHIVE_WASM.clone()).unwrap();
+    init_arg.native_oidc_clients = Some(clients);
+    init_arg.native_oidc_issuer_origin = issuer_origin.map(str::to_string);
+    let canister_id = install_ii_canister_with_arg(env, II_WASM.clone(), Some(init_arg));
+    api::deploy_archive(env, canister_id, &ARCHIVE_WASM)
+        .expect("archive deployment should succeed");
+    canister_id
+}
+
+#[derive(Deserialize)]
+struct IdTokenClaims {
+    iss: String,
+    sub: String,
+    aud: String,
+    nonce: String,
+    exp: u64,
+}
+
+fn decode_query_component(value: &str) -> String {
+    let mut bytes = Vec::with_capacity(value.len());
+    let mut chars = value.as_bytes().iter().copied();
+    while let Some(byte) = chars.next() {
+        match byte {
+            b'%' => {
+                let high = chars.next().expect("high nibble should exist");
+                let low = chars.next().expect("low nibble should exist");
+                let high = (high as char).to_digit(16).expect("hex high");
+                let low = (low as char).to_digit(16).expect("hex low");
+                bytes.push(((high << 4) | low) as u8);
+            }
+            b'+' => bytes.push(b' '),
+            _ => bytes.push(byte),
+        }
+    }
+    String::from_utf8(bytes).expect("query component should be UTF-8")
+}
+
+fn query_param(url: &str, name: &str) -> Option<String> {
+    let (_, query) = url.split_once('?')?;
+    query.split('&').find_map(|pair| {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        (key == name).then(|| decode_query_component(value))
+    })
 }
 
 #[test]
-fn should_prepare_and_fetch_native_delegation() -> Result<(), RejectResponse> {
+fn should_complete_redeem_oidc_token_and_exchange_native_authorization(
+) -> Result<(), RejectResponse> {
     let env = env();
-    let canister_id = install_ii_with_archive(&env, None, None);
+    let request = native_request();
+    let canister_id = install_native_oidc_ii(
+        &env,
+        vec![native_client_config(
+            &request.client_id,
+            vec![request.redirect_uri.clone()],
+        )],
+    );
     let anchor_number = flows::register_anchor(&env, canister_id);
-    let session_key = ByteBuf::from("native session key");
-    let request = PrepareNativeAuthorizationRequest {
-        origin: "https://app.example.com".to_string(),
-        ii_origin: "https://identity.test".to_string(),
-        session_public_key: session_key.clone(),
-        return_link: "https://app.example.com/callback".to_string(),
-        max_time_to_live: None,
-    };
 
     let prepared = api::prepare_native_authorization(&env, canister_id, &request)?
         .expect("prepare native authorization should succeed");
@@ -53,11 +140,6 @@ fn should_prepare_and_fetch_native_delegation() -> Result<(), RejectResponse> {
             request.ii_origin, prepared.request_id
         )
     );
-
-    let loaded = api::get_native_authorization_request(&env, canister_id, &prepared.request_id)?
-        .expect("native request should be readable before completion");
-    assert_eq!(loaded.origin, request.origin);
-    assert_eq!(loaded.session_public_key, session_key);
 
     let completed = api::complete_native_authorization(
         &env,
@@ -71,508 +153,241 @@ fn should_prepare_and_fetch_native_delegation() -> Result<(), RejectResponse> {
     assert_eq!(
         completed.redirect_url,
         format!(
-            "{}?native_request_id={}",
-            request.return_link, prepared.request_id
+            "{}?code={}&state={}",
+            request.redirect_uri, prepared.request_id, request.state
         )
     );
 
-    let fetched = api::fetch_native_delegation(&env, canister_id, &prepared.request_id)?;
-    let native_delegation = match fetched {
-        FetchNativeDelegationResponse::SignedDelegation(native_delegation) => native_delegation,
-        other => panic!("unexpected native delegation response: {other:?}"),
-    };
+    let token_response = api::redeem_native_authorization_code(
+        &env,
+        canister_id,
+        &redeem_request(
+            &prepared.request_id,
+            &request.redirect_uri,
+            &request.client_id,
+        ),
+    )?
+    .expect("redeem should succeed");
+    assert!(token_response
+        .token_type
+        .contains("/oauth/token-type/native-access-token"));
+    assert!(!token_response.access_token.is_empty());
+    assert!(token_response.expires_in > 0);
 
+    let id_token_parts: Vec<_> = token_response.id_token.split('.').collect();
+    assert_eq!(id_token_parts.len(), 3);
+    let claims: IdTokenClaims = serde_json::from_slice(
+        &URL_SAFE_NO_PAD
+            .decode(id_token_parts[1])
+            .expect("payload should decode"),
+    )
+    .expect("claims should parse");
+    assert_eq!(claims.iss, DEFAULT_TRUSTED_ISSUER_ORIGIN);
+    assert_eq!(claims.aud, request.client_id);
+    assert_ne!(claims.sub, anchor_number.to_string());
+    assert_eq!(claims.nonce, request.nonce);
+    assert!(claims.exp > 0);
+    assert_eq!(
+        token_response.token_type,
+        format!("{DEFAULT_TRUSTED_ISSUER_ORIGIN}/oauth/token-type/native-access-token")
+    );
+
+    let exchanged = api::exchange_native_access_token_for_delegation(
+        &env,
+        canister_id,
+        &ExchangeNativeAccessTokenForDelegationRequest {
+            access_token: token_response.access_token,
+        },
+    )?
+    .expect("exchange should succeed");
     verify_delegation(
         &env,
-        native_delegation.user_key,
-        &native_delegation.signed_delegation,
+        exchanged.user_key,
+        &exchanged.signed_delegation,
         &env.root_key().unwrap(),
     );
-    assert_eq!(
-        native_delegation.signed_delegation.delegation.pubkey,
-        session_key
-    );
     Ok(())
 }
 
 #[test]
-fn should_store_canonical_origin_for_native_request() -> Result<(), RejectResponse> {
+fn should_support_private_use_redirect_uri() -> Result<(), RejectResponse> {
     let env = env();
-    let canister_id = install_ii_with_archive(&env, None, None);
-    let request = PrepareNativeAuthorizationRequest {
-        origin: "https://App.Example.com:443".to_string(),
-        ii_origin: "https://identity.test".to_string(),
-        session_public_key: ByteBuf::from("native session key"),
-        return_link: "https://app.example.com/callback".to_string(),
-        max_time_to_live: None,
-    };
-
-    let prepared = api::prepare_native_authorization(&env, canister_id, &request)?
-        .expect("prepare native authorization should succeed");
-    let loaded = api::get_native_authorization_request(&env, canister_id, &prepared.request_id)?
-        .expect("native request should be readable before completion");
-    assert_eq!(loaded.origin, "https://app.example.com");
-    Ok(())
-}
-
-#[test]
-fn should_match_regular_delegation_for_same_origin() -> Result<(), RejectResponse> {
-    let env = env();
-    let canister_id = install_ii_with_archive(&env, None, None);
-    let anchor_number = flows::register_anchor(&env, canister_id);
-    let session_key = ByteBuf::from("same session key");
-    let origin = "https://same-origin.com";
-
-    let regular = api::prepare_delegation(
+    let mut request = native_request();
+    request.redirect_uri = "com.example.app:/oauth2redirect/ii".to_string();
+    let canister_id = install_native_oidc_ii(
         &env,
-        canister_id,
-        principal_1(),
-        anchor_number,
-        origin,
-        &session_key,
-        None,
-    )?;
-    let request = PrepareNativeAuthorizationRequest {
-        origin: origin.to_string(),
-        ii_origin: "https://identity.test".to_string(),
-        session_public_key: session_key,
-        return_link: "https://same-origin.com/callback".to_string(),
-        max_time_to_live: None,
-    };
-    let prepared = api::prepare_native_authorization(&env, canister_id, &request)?
-        .expect("prepare native authorization should succeed");
-    api::complete_native_authorization(
-        &env,
-        canister_id,
-        principal_1(),
-        anchor_number,
-        &prepared.request_id,
-        None,
-    )?
-    .expect("completion should succeed");
-
-    let fetched = api::fetch_native_delegation(&env, canister_id, &prepared.request_id)?;
-    let native_delegation = match fetched {
-        FetchNativeDelegationResponse::SignedDelegation(native_delegation) => native_delegation,
-        other => panic!("unexpected native delegation response: {other:?}"),
-    };
-    assert_eq!(native_delegation.user_key, regular.0);
-    Ok(())
-}
-
-#[test]
-fn should_return_pending_before_completion() -> Result<(), RejectResponse> {
-    let env = env();
-    let canister_id = install_ii_with_archive(&env, None, None);
-    let request = PrepareNativeAuthorizationRequest {
-        origin: "https://app.example.com".to_string(),
-        ii_origin: "https://identity.test".to_string(),
-        session_public_key: ByteBuf::from("pending session key"),
-        return_link: "https://app.example.com/callback".to_string(),
-        max_time_to_live: None,
-    };
-    let prepared = api::prepare_native_authorization(&env, canister_id, &request)?
-        .expect("prepare native authorization should succeed");
-
-    assert!(matches!(
-        api::fetch_native_delegation(&env, canister_id, &prepared.request_id)?,
-        FetchNativeDelegationResponse::Pending
-    ));
-    Ok(())
-}
-
-#[test]
-fn should_reject_invalid_return_link() -> Result<(), RejectResponse> {
-    let env = env();
-    let canister_id = install_ii_with_archive(&env, None, None);
-    let request = PrepareNativeAuthorizationRequest {
-        origin: "https://app.example.com".to_string(),
-        ii_origin: "https://identity.test".to_string(),
-        session_public_key: ByteBuf::from("native session key"),
-        return_link: "myapp://callback".to_string(),
-        max_time_to_live: None,
-    };
-
-    let result = api::prepare_native_authorization(&env, canister_id, &request)?;
-    assert!(matches!(
-        result,
-        Err(PrepareNativeAuthorizationError::InvalidReturnLink(_))
-    ));
-    Ok(())
-}
-
-#[test]
-fn should_reject_return_link_with_userinfo() -> Result<(), RejectResponse> {
-    let env = env();
-    let canister_id = install_ii_with_archive(&env, None, None);
-    let mut request = native_request();
-    request.return_link = "https://user@app.example.com/callback".to_string();
-
-    let result = api::prepare_native_authorization(&env, canister_id, &request)?;
-    assert!(matches!(
-        result,
-        Err(PrepareNativeAuthorizationError::InvalidReturnLink(_))
-    ));
-    Ok(())
-}
-
-#[test]
-fn should_reject_invalid_ii_origin() -> Result<(), RejectResponse> {
-    let env = env();
-    let canister_id = install_ii_with_archive(&env, None, None);
-    let mut request = native_request();
-    request.ii_origin = "https://identity.test:notaport".to_string();
-
-    let result = api::prepare_native_authorization(&env, canister_id, &request)?;
-    assert!(
-        matches!(
-            result,
-            Err(PrepareNativeAuthorizationError::InvalidOrigin(_))
-        ),
-        "unexpected result: {result:?}"
+        vec![native_client_config(
+            &request.client_id,
+            vec![request.redirect_uri.clone()],
+        )],
     );
-    Ok(())
-}
 
-#[test]
-fn should_reject_ii_origin_with_userinfo() -> Result<(), RejectResponse> {
-    let env = env();
-    let canister_id = install_ii_with_archive(&env, None, None);
-    let mut request = native_request();
-    request.ii_origin = "https://user@identity.test".to_string();
-
-    let result = api::prepare_native_authorization(&env, canister_id, &request)?;
-    assert!(
-        matches!(
-            result,
-            Err(PrepareNativeAuthorizationError::InvalidOrigin(_))
-        ),
-        "unexpected result: {result:?}"
-    );
-    Ok(())
-}
-
-#[test]
-fn should_reject_invalid_origin() -> Result<(), RejectResponse> {
-    let env = env();
-    let canister_id = install_ii_with_archive(&env, None, None);
-    let mut request = native_request();
-    request.origin = "https://some-dapp.com/path".to_string();
-
-    let result = api::prepare_native_authorization(&env, canister_id, &request)?;
-    assert!(
-        matches!(
-            result,
-            Err(PrepareNativeAuthorizationError::InvalidOrigin(_))
-        ),
-        "unexpected result: {result:?}"
-    );
-    Ok(())
-}
-
-#[test]
-fn should_reject_origin_that_does_not_match_return_link_origin() -> Result<(), RejectResponse> {
-    let env = env();
-    let canister_id = install_ii_with_archive(&env, None, None);
-    let mut request = native_request();
-    request.origin = "https://some-dapp.com".to_string();
-
-    let result = api::prepare_native_authorization(&env, canister_id, &request)?;
-    assert!(
-        matches!(
-            result,
-            Err(PrepareNativeAuthorizationError::InvalidOrigin(_))
-        ),
-        "unexpected result: {result:?}"
-    );
-    Ok(())
-}
-
-#[test]
-fn should_reject_non_https_origin_even_if_return_link_matches() -> Result<(), RejectResponse> {
-    let env = env();
-    let canister_id = install_ii_with_archive(&env, None, None);
-    let mut request = native_request();
-    request.origin = "http://app.example.com".to_string();
-    request.return_link = "https://app.example.com/callback".to_string();
-
-    let result = api::prepare_native_authorization(&env, canister_id, &request)?;
-    assert!(
-        matches!(
-            result,
-            Err(PrepareNativeAuthorizationError::InvalidOrigin(_))
-        ),
-        "unexpected result: {result:?}"
-    );
-    Ok(())
-}
-
-#[test]
-fn should_accept_origin_matching_return_link_default_https_port() -> Result<(), RejectResponse> {
-    let env = env();
-    let canister_id = install_ii_with_archive(&env, None, None);
-    let mut request = native_request();
-    request.origin = "https://app.example.com".to_string();
-    request.return_link = "https://app.example.com:443/callback".to_string();
-
-    let result = api::prepare_native_authorization(&env, canister_id, &request)?;
-    assert!(result.is_ok());
-    Ok(())
-}
-
-#[test]
-fn should_reject_return_link_with_invalid_port() -> Result<(), RejectResponse> {
-    let env = env();
-    let canister_id = install_ii_with_archive(&env, None, None);
-    let mut request = native_request();
-    request.return_link = "https://app.example.com:notaport/callback".to_string();
-
-    let result = api::prepare_native_authorization(&env, canister_id, &request)?;
-    assert!(matches!(
-        result,
-        Err(PrepareNativeAuthorizationError::InvalidReturnLink(_))
-    ));
-    Ok(())
-}
-
-#[test]
-fn should_expire_pending_request_after_fixed_ttl_even_with_long_delegation_ttl(
-) -> Result<(), RejectResponse> {
-    let env = env();
-    let canister_id = install_ii_with_archive(&env, None, None);
-    let request = PrepareNativeAuthorizationRequest {
-        origin: "https://app.example.com".to_string(),
-        ii_origin: "https://identity.test".to_string(),
-        session_public_key: ByteBuf::from("native session key"),
-        return_link: "https://app.example.com/callback".to_string(),
-        max_time_to_live: Some(Duration::from_secs(30 * 24 * 60 * 60).as_nanos() as u64),
-    };
-    let prepared = api::prepare_native_authorization(&env, canister_id, &request)?
-        .expect("prepare native authorization should succeed");
-    env.advance_time(Duration::from_secs(NATIVE_REQUEST_TTL_SECS + 1));
-    env.tick();
-
-    let loaded = api::get_native_authorization_request(&env, canister_id, &prepared.request_id)?;
-    assert!(matches!(
-        loaded,
-        Err(GetNativeAuthorizationRequestError::Expired)
-    ));
-    assert!(matches!(
-        api::fetch_native_delegation(&env, canister_id, &prepared.request_id)?,
-        FetchNativeDelegationResponse::Expired
-    ));
-    Ok(())
-}
-
-#[test]
-fn should_reject_unauthorized_completion() -> Result<(), RejectResponse> {
-    let env = env();
-    let canister_id = install_ii_with_archive(&env, None, None);
-    let anchor_number = flows::register_anchor(&env, canister_id);
-    let request = PrepareNativeAuthorizationRequest {
-        origin: "https://app.example.com".to_string(),
-        ii_origin: "https://identity.test".to_string(),
-        session_public_key: ByteBuf::from("native session key"),
-        return_link: "https://app.example.com/callback".to_string(),
-        max_time_to_live: None,
-    };
-    let prepared = api::prepare_native_authorization(&env, canister_id, &request)?
-        .expect("prepare native authorization should succeed");
-
-    let result = api::complete_native_authorization(
-        &env,
-        canister_id,
-        Principal::anonymous(),
-        anchor_number,
-        &prepared.request_id,
-        None,
-    )?;
-    assert!(matches!(
-        result,
-        Err(CompleteNativeAuthorizationError::Unauthorized(_))
-    ));
-    Ok(())
-}
-
-#[test]
-fn should_expire_completed_request_after_grace_period() -> Result<(), RejectResponse> {
-    let env = env();
-    let canister_id = install_ii_with_archive(&env, None, None);
-    let anchor_number = flows::register_anchor(&env, canister_id);
-    let request = native_request();
-    let prepared = api::prepare_native_authorization(&env, canister_id, &request)?
-        .expect("prepare native authorization should succeed");
-    api::complete_native_authorization(
-        &env,
-        canister_id,
-        principal_1(),
-        anchor_number,
-        &prepared.request_id,
-        None,
-    )?
-    .expect("completion should succeed");
-
-    assert!(matches!(
-        api::fetch_native_delegation(&env, canister_id, &prepared.request_id)?,
-        FetchNativeDelegationResponse::SignedDelegation(_)
-    ));
-
-    env.advance_time(Duration::from_secs(COMPLETED_REQUEST_GRACE_PERIOD_SECS + 1));
-    env.tick();
-
-    assert!(matches!(
-        api::fetch_native_delegation(&env, canister_id, &prepared.request_id)?,
-        FetchNativeDelegationResponse::Expired
-    ));
-    Ok(())
-}
-
-#[test]
-fn should_prune_expired_requests_on_next_prepare() -> Result<(), RejectResponse> {
-    let env = env();
-    let canister_id = install_ii_with_archive(&env, None, None);
-    let request = PrepareNativeAuthorizationRequest {
-        origin: "https://app.example.com".to_string(),
-        ii_origin: "https://identity.test".to_string(),
-        session_public_key: ByteBuf::from("native session key"),
-        return_link: "https://app.example.com/callback".to_string(),
-        max_time_to_live: Some(Duration::from_secs(30 * 24 * 60 * 60).as_nanos() as u64),
-    };
-    let prepared = api::prepare_native_authorization(&env, canister_id, &request)?
-        .expect("prepare native authorization should succeed");
-    env.advance_time(Duration::from_secs(NATIVE_REQUEST_TTL_SECS + 1));
-    env.tick();
     api::prepare_native_authorization(&env, canister_id, &request)?
-        .expect("second prepare should succeed");
-
-    assert!(matches!(
-        api::fetch_native_delegation(&env, canister_id, &prepared.request_id)?,
-        FetchNativeDelegationResponse::NotFound
-    ));
-    Ok(())
-}
-
-#[test]
-fn should_prune_expired_completed_requests_on_next_prepare() -> Result<(), RejectResponse> {
-    let env = env();
-    let canister_id = install_ii_with_archive(&env, None, None);
-    let anchor_number = flows::register_anchor(&env, canister_id);
-    let request = native_request();
-    let prepared = api::prepare_native_authorization(&env, canister_id, &request)?
         .expect("prepare native authorization should succeed");
-    api::complete_native_authorization(
-        &env,
-        canister_id,
-        principal_1(),
-        anchor_number,
-        &prepared.request_id,
-        None,
-    )?
-    .expect("completion should succeed");
-
-    env.advance_time(Duration::from_secs(COMPLETED_REQUEST_GRACE_PERIOD_SECS + 1));
-    env.tick();
-    api::prepare_native_authorization(&env, canister_id, &request)?
-        .expect("second prepare should succeed");
-
-    assert!(matches!(
-        api::fetch_native_delegation(&env, canister_id, &prepared.request_id)?,
-        FetchNativeDelegationResponse::NotFound
-    ));
     Ok(())
 }
 
 #[test]
-fn should_keep_completed_request_fetchable_for_full_grace_period_after_short_pending_window(
-) -> Result<(), RejectResponse> {
+fn should_reject_private_use_redirect_uri_with_unregistered_origin() -> Result<(), RejectResponse> {
     let env = env();
-    let canister_id = install_ii_with_archive(&env, None, None);
-    let anchor_number = flows::register_anchor(&env, canister_id);
-    let request = native_request();
-    let prepared = api::prepare_native_authorization(&env, canister_id, &request)?
-        .expect("prepare native authorization should succeed");
-
-    env.advance_time(Duration::from_secs(NATIVE_REQUEST_TTL_SECS - 30));
-    env.tick();
-    api::complete_native_authorization(
-        &env,
-        canister_id,
-        principal_1(),
-        anchor_number,
-        &prepared.request_id,
-        None,
-    )?
-    .expect("completion should succeed");
-
-    env.advance_time(Duration::from_secs(4 * 60 + 45));
-    env.tick();
-    assert!(matches!(
-        api::fetch_native_delegation(&env, canister_id, &prepared.request_id)?,
-        FetchNativeDelegationResponse::SignedDelegation(_)
-    ));
-    Ok(())
-}
-
-#[test]
-fn should_not_record_activity_for_missing_or_expired_request() -> Result<(), RejectResponse> {
-    let env = env();
-    let canister_id = install_ii_with_archive(&env, None, None);
-    let anchor_number = flows::register_anchor(&env, canister_id);
-
-    let missing_result = api::complete_native_authorization(
-        &env,
-        canister_id,
-        principal_1(),
-        anchor_number,
-        "missing-request",
-        None,
-    )?;
-    assert!(matches!(
-        missing_result,
-        Err(CompleteNativeAuthorizationError::NotFound)
-    ));
-    assert!(!get_metrics(&env, canister_id).contains("internet_identity_daily_active_anchors"));
-
     let mut request = native_request();
-    request.max_time_to_live = Some(Duration::from_secs(30 * 24 * 60 * 60).as_nanos() as u64);
-    let prepared = api::prepare_native_authorization(&env, canister_id, &request)?
-        .expect("prepare native authorization should succeed");
-    env.advance_time(Duration::from_secs(NATIVE_REQUEST_TTL_SECS + 1));
-    env.tick();
-
-    let expired_result = api::complete_native_authorization(
+    request.redirect_uri = "com.example.app:/oauth2redirect/ii".to_string();
+    request.origin = "https://evil.example.com".to_string();
+    let canister_id = install_native_oidc_ii(
         &env,
-        canister_id,
-        principal_1(),
-        anchor_number,
-        &prepared.request_id,
-        None,
-    )?;
+        vec![native_client_config(
+            &request.client_id,
+            vec![request.redirect_uri.clone()],
+        )],
+    );
+
+    let result = api::prepare_native_authorization(&env, canister_id, &request)?;
     assert!(matches!(
-        expired_result,
-        Err(CompleteNativeAuthorizationError::Expired)
+        result,
+        Err(PrepareNativeAuthorizationError::InvalidOrigin(_))
     ));
-    assert!(!get_metrics(&env, canister_id).contains("internet_identity_daily_active_anchors"));
     Ok(())
 }
 
 #[test]
-fn should_not_update_last_used_on_already_completed_request() -> Result<(), RejectResponse> {
+fn should_reject_claimed_https_redirect_uri_with_mismatched_origin() -> Result<(), RejectResponse> {
     let env = env();
-    let canister_id = install_ii_with_archive(&env, None, None);
-    let anchor_number = flows::register_anchor(&env, canister_id);
-    api::add(
+    let mut request = native_request();
+    request.origin = "https://evil.example.com".to_string();
+    let canister_id = install_native_oidc_ii(
         &env,
-        canister_id,
-        principal_1(),
-        anchor_number,
-        &recovery_device_data_1(),
-    )?;
-    let request = native_request();
-    let prepared = api::prepare_native_authorization(&env, canister_id, &request)?
-        .expect("prepare native authorization should succeed");
+        vec![native_client_config(
+            &request.client_id,
+            vec![request.redirect_uri.clone()],
+        )],
+    );
 
-    api::complete_native_authorization(
+    let result = api::prepare_native_authorization(&env, canister_id, &request)?;
+    assert!(matches!(
+        result,
+        Err(PrepareNativeAuthorizationError::InvalidRedirectUri(_))
+    ));
+    Ok(())
+}
+
+#[test]
+fn should_support_loopback_redirect_uri() -> Result<(), RejectResponse> {
+    let env = env();
+    let mut request = native_request();
+    request.redirect_uri = "http://127.0.0.1:49152/oauth2redirect/ii".to_string();
+    let canister_id = install_native_oidc_ii(
+        &env,
+        vec![native_client_config(
+            &request.client_id,
+            vec![request.redirect_uri.clone()],
+        )],
+    );
+
+    api::prepare_native_authorization(&env, canister_id, &request)?
+        .expect("prepare native authorization should succeed");
+    Ok(())
+}
+
+#[test]
+fn should_reject_loopback_redirect_uri_with_unregistered_origin() -> Result<(), RejectResponse> {
+    let env = env();
+    let mut request = native_request();
+    request.redirect_uri = "http://127.0.0.1:49152/oauth2redirect/ii".to_string();
+    request.origin = "https://evil.example.com".to_string();
+    let canister_id = install_native_oidc_ii(
+        &env,
+        vec![native_client_config(
+            &request.client_id,
+            vec![request.redirect_uri.clone()],
+        )],
+    );
+
+    let result = api::prepare_native_authorization(&env, canister_id, &request)?;
+    assert!(matches!(
+        result,
+        Err(PrepareNativeAuthorizationError::InvalidOrigin(_))
+    ));
+    Ok(())
+}
+
+#[test]
+fn should_reject_non_reverse_domain_private_use_scheme() -> Result<(), RejectResponse> {
+    let env = env();
+    let mut request = native_request();
+    request.redirect_uri = "myapp:/callback".to_string();
+    let canister_id = install_native_oidc_ii(
+        &env,
+        vec![native_client_config(
+            &request.client_id,
+            vec!["com.example.app:/oauth2redirect/ii".to_string()],
+        )],
+    );
+
+    let result = api::prepare_native_authorization(&env, canister_id, &request)?;
+    assert!(matches!(
+        result,
+        Err(PrepareNativeAuthorizationError::InvalidRedirectUri(_))
+    ));
+    Ok(())
+}
+
+#[test]
+fn should_reject_unregistered_redirect_uri() -> Result<(), RejectResponse> {
+    let env = env();
+    let request = native_request();
+    let canister_id = install_native_oidc_ii(
+        &env,
+        vec![native_client_config(
+            &request.client_id,
+            vec!["https://app.example.com/other-callback".to_string()],
+        )],
+    );
+
+    let result = api::prepare_native_authorization(&env, canister_id, &request)?;
+    assert!(matches!(
+        result,
+        Err(PrepareNativeAuthorizationError::InvalidRedirectUri(_))
+    ));
+    Ok(())
+}
+
+#[test]
+fn should_reject_missing_openid_scope() -> Result<(), RejectResponse> {
+    let env = env();
+    let mut request = native_request();
+    request.scope = vec!["profile".to_string()];
+    let canister_id = install_native_oidc_ii(
+        &env,
+        vec![native_client_config(
+            &request.client_id,
+            vec![request.redirect_uri.clone()],
+        )],
+    );
+
+    let result = api::prepare_native_authorization(&env, canister_id, &request)?;
+    assert!(matches!(
+        result,
+        Err(PrepareNativeAuthorizationError::InvalidRequest(_))
+    ));
+    Ok(())
+}
+
+#[test]
+fn should_percent_encode_state_in_redirect_url() -> Result<(), RejectResponse> {
+    let env = env();
+    let mut request = native_request();
+    request.state = "state=1&redirect=/nested-path".to_string();
+    let canister_id = install_native_oidc_ii(
+        &env,
+        vec![native_client_config(
+            &request.client_id,
+            vec![request.redirect_uri.clone()],
+        )],
+    );
+    let anchor_number = flows::register_anchor(&env, canister_id);
+    let prepared = api::prepare_native_authorization(&env, canister_id, &request)?
+        .expect("prepare should succeed");
+    let completed = api::complete_native_authorization(
         &env,
         canister_id,
         principal_1(),
@@ -581,66 +396,31 @@ fn should_not_update_last_used_on_already_completed_request() -> Result<(), Reje
         None,
     )?
     .expect("completion should succeed");
-
-    env.advance_time(Duration::from_secs(1));
-    let anchor_info_before =
-        api::get_anchor_info(&env, canister_id, principal_recovery_1(), anchor_number)?;
-    let last_used_before = device_last_used(&anchor_info_before, &device_data_1().pubkey);
-
-    env.advance_time(Duration::from_secs(1));
-    let second_result = api::complete_native_authorization(
-        &env,
-        canister_id,
-        principal_1(),
-        anchor_number,
-        &prepared.request_id,
-        None,
-    )?;
-    assert!(matches!(
-        second_result,
-        Err(CompleteNativeAuthorizationError::AlreadyCompleted)
-    ));
-
-    env.advance_time(Duration::from_secs(1));
-    let anchor_info_after =
-        api::get_anchor_info(&env, canister_id, principal_recovery_1(), anchor_number)?;
     assert_eq!(
-        device_last_used(&anchor_info_after, &device_data_1().pubkey),
-        last_used_before
+        query_param(&completed.redirect_url, "code"),
+        Some(prepared.request_id)
+    );
+    assert_eq!(
+        query_param(&completed.redirect_url, "state"),
+        Some(request.state)
     );
     Ok(())
 }
 
 #[test]
-fn should_allow_retry_after_completion_fails_midway_before_pending_ttl_expires(
-) -> Result<(), RejectResponse> {
+fn should_allow_redeem_retry_after_pkce_mismatch() -> Result<(), RejectResponse> {
     let env = env();
-    let canister_id = install_ii_with_archive(&env, None, None);
-    let anchor_number = flows::register_anchor(&env, canister_id);
-    let prepared = api::prepare_native_authorization(&env, canister_id, &native_request())?
-        .expect("prepare native authorization should succeed");
-
-    let failed = api::complete_native_authorization(
+    let request = native_request();
+    let canister_id = install_native_oidc_ii(
         &env,
-        canister_id,
-        principal_1(),
-        anchor_number,
-        &prepared.request_id,
-        Some(999_999),
-    )?;
-    assert!(matches!(
-        failed,
-        Err(CompleteNativeAuthorizationError::InternalCanisterError(_))
-    ));
-    assert!(matches!(
-        api::get_native_authorization_request(&env, canister_id, &prepared.request_id)?,
-        Ok(_)
-    ));
-    assert!(matches!(
-        api::fetch_native_delegation(&env, canister_id, &prepared.request_id)?,
-        FetchNativeDelegationResponse::Pending
-    ));
-
+        vec![native_client_config(
+            &request.client_id,
+            vec![request.redirect_uri.clone()],
+        )],
+    );
+    let anchor_number = flows::register_anchor(&env, canister_id);
+    let prepared = api::prepare_native_authorization(&env, canister_id, &request)?
+        .expect("prepare should succeed");
     api::complete_native_authorization(
         &env,
         canister_id,
@@ -649,82 +429,334 @@ fn should_allow_retry_after_completion_fails_midway_before_pending_ttl_expires(
         &prepared.request_id,
         None,
     )?
-    .expect("completion retry should succeed");
-    assert!(matches!(
-        api::fetch_native_delegation(&env, canister_id, &prepared.request_id)?,
-        FetchNativeDelegationResponse::SignedDelegation(_)
-    ));
-    Ok(())
-}
+    .expect("completion should succeed");
 
-#[test]
-fn should_not_extend_pending_ttl_when_completion_fails_midway() -> Result<(), RejectResponse> {
-    let env = env();
-    let canister_id = install_ii_with_archive(&env, None, None);
-    let anchor_number = flows::register_anchor(&env, canister_id);
-    let prepared = api::prepare_native_authorization(&env, canister_id, &native_request())?
-        .expect("prepare native authorization should succeed");
-
-    let failed = api::complete_native_authorization(
+    let invalid = api::redeem_native_authorization_code(
         &env,
         canister_id,
-        principal_1(),
-        anchor_number,
-        &prepared.request_id,
-        Some(999_999),
+        &RedeemNativeAuthorizationCodeRequest {
+            code_verifier: "wrong-verifier".to_string(),
+            ..redeem_request(
+                &prepared.request_id,
+                &request.redirect_uri,
+                &request.client_id,
+            )
+        },
     )?;
     assert!(matches!(
-        failed,
-        Err(CompleteNativeAuthorizationError::InternalCanisterError(_))
+        invalid,
+        Err(RedeemNativeAuthorizationCodeError::InvalidGrant(_))
     ));
 
-    env.advance_time(Duration::from_secs(NATIVE_REQUEST_TTL_SECS + 1));
-    env.tick();
-
-    assert!(matches!(
-        api::get_native_authorization_request(&env, canister_id, &prepared.request_id)?,
-        Err(GetNativeAuthorizationRequestError::Expired)
-    ));
-    assert!(matches!(
-        api::complete_native_authorization(
-            &env,
-            canister_id,
-            principal_1(),
-            anchor_number,
+    let valid = api::redeem_native_authorization_code(
+        &env,
+        canister_id,
+        &redeem_request(
             &prepared.request_id,
-            None,
-        )?,
-        Err(CompleteNativeAuthorizationError::Expired)
-    ));
+            &request.redirect_uri,
+            &request.client_id,
+        ),
+    )?;
+    assert!(valid.is_ok());
+    Ok(())
+}
+
+#[test]
+fn should_not_use_caller_supplied_ii_origin_for_signed_issuer() -> Result<(), RejectResponse> {
+    let env = env();
+    let mut request = native_request();
+    request.ii_origin = "https://attacker.example.com".to_string();
+    let canister_id = install_native_oidc_ii(
+        &env,
+        vec![native_client_config(
+            &request.client_id,
+            vec![request.redirect_uri.clone()],
+        )],
+    );
+    let anchor_number = flows::register_anchor(&env, canister_id);
+    let prepared = api::prepare_native_authorization(&env, canister_id, &request)?
+        .expect("prepare should succeed");
+    api::complete_native_authorization(
+        &env,
+        canister_id,
+        principal_1(),
+        anchor_number,
+        &prepared.request_id,
+        None,
+    )?
+    .expect("completion should succeed");
+    let token_response = api::redeem_native_authorization_code(
+        &env,
+        canister_id,
+        &redeem_request(
+            &prepared.request_id,
+            &request.redirect_uri,
+            &request.client_id,
+        ),
+    )?
+    .expect("redeem should succeed");
+    let claims: IdTokenClaims = serde_json::from_slice(
+        &URL_SAFE_NO_PAD
+            .decode(
+                token_response
+                    .id_token
+                    .split('.')
+                    .nth(1)
+                    .expect("JWT payload"),
+            )
+            .expect("payload should decode"),
+    )
+    .expect("claims should parse");
+
+    assert_eq!(claims.iss, DEFAULT_TRUSTED_ISSUER_ORIGIN);
+    assert_ne!(claims.iss, request.ii_origin);
+    assert_eq!(
+        token_response.token_type,
+        format!("{DEFAULT_TRUSTED_ISSUER_ORIGIN}/oauth/token-type/native-access-token")
+    );
+    Ok(())
+}
+
+#[test]
+fn should_use_configured_issuer_for_signed_tokens() -> Result<(), RejectResponse> {
+    let env = env();
+    let request = native_request();
+    let configured_issuer = "https://identity.ic0.app";
+    let canister_id = install_native_oidc_ii_with_issuer(
+        &env,
+        vec![native_client_config(
+            &request.client_id,
+            vec![request.redirect_uri.clone()],
+        )],
+        Some(configured_issuer),
+    );
+    let anchor_number = flows::register_anchor(&env, canister_id);
+    let prepared = api::prepare_native_authorization(&env, canister_id, &request)?
+        .expect("prepare should succeed");
+    api::complete_native_authorization(
+        &env,
+        canister_id,
+        principal_1(),
+        anchor_number,
+        &prepared.request_id,
+        None,
+    )?
+    .expect("completion should succeed");
+    let token_response = api::redeem_native_authorization_code(
+        &env,
+        canister_id,
+        &redeem_request(
+            &prepared.request_id,
+            &request.redirect_uri,
+            &request.client_id,
+        ),
+    )?
+    .expect("redeem should succeed");
+    let claims: IdTokenClaims = serde_json::from_slice(
+        &URL_SAFE_NO_PAD
+            .decode(
+                token_response
+                    .id_token
+                    .split('.')
+                    .nth(1)
+                    .expect("JWT payload"),
+            )
+            .expect("payload should decode"),
+    )
+    .expect("claims should parse");
+
+    assert_eq!(claims.iss, configured_issuer);
+    assert_eq!(
+        token_response.token_type,
+        format!("{configured_issuer}/oauth/token-type/native-access-token")
+    );
+    Ok(())
+}
+
+#[test]
+fn should_reject_second_redeem() -> Result<(), RejectResponse> {
+    let env = env();
+    let request = native_request();
+    let canister_id = install_native_oidc_ii(
+        &env,
+        vec![native_client_config(
+            &request.client_id,
+            vec![request.redirect_uri.clone()],
+        )],
+    );
+    let anchor_number = flows::register_anchor(&env, canister_id);
+    let prepared = api::prepare_native_authorization(&env, canister_id, &request)?
+        .expect("prepare should succeed");
+    api::complete_native_authorization(
+        &env,
+        canister_id,
+        principal_1(),
+        anchor_number,
+        &prepared.request_id,
+        None,
+    )?
+    .expect("completion should succeed");
+
+    api::redeem_native_authorization_code(
+        &env,
+        canister_id,
+        &redeem_request(
+            &prepared.request_id,
+            &request.redirect_uri,
+            &request.client_id,
+        ),
+    )?
+    .expect("first redeem should succeed");
+    let second = api::redeem_native_authorization_code(
+        &env,
+        canister_id,
+        &redeem_request(
+            &prepared.request_id,
+            &request.redirect_uri,
+            &request.client_id,
+        ),
+    )?;
     assert!(matches!(
-        api::fetch_native_delegation(&env, canister_id, &prepared.request_id)?,
-        FetchNativeDelegationResponse::Expired
+        second,
+        Err(RedeemNativeAuthorizationCodeError::InvalidGrant(_))
     ));
     Ok(())
 }
 
 #[test]
-fn should_reject_new_requests_when_capacity_is_exhausted_until_pending_requests_expire(
-) -> Result<(), RejectResponse> {
+fn should_return_expired_for_expired_access_token() -> Result<(), RejectResponse> {
     let env = env();
-    let canister_id = install_ii_with_archive(&env, None, None);
     let request = native_request();
-
-    for _ in 0..1_000 {
-        let result = api::prepare_native_authorization(&env, canister_id, &request)?;
-        assert!(result.is_ok());
-    }
-
-    let overflow = api::prepare_native_authorization(&env, canister_id, &request)?;
-    assert!(matches!(
-        overflow,
-        Err(PrepareNativeAuthorizationError::TooManyRequests)
-    ));
+    let canister_id = install_native_oidc_ii(
+        &env,
+        vec![native_client_config(
+            &request.client_id,
+            vec![request.redirect_uri.clone()],
+        )],
+    );
+    let anchor_number = flows::register_anchor(&env, canister_id);
+    let prepared = api::prepare_native_authorization(&env, canister_id, &request)?
+        .expect("prepare should succeed");
+    api::complete_native_authorization(
+        &env,
+        canister_id,
+        principal_1(),
+        anchor_number,
+        &prepared.request_id,
+        None,
+    )?
+    .expect("completion should succeed");
+    let token_response = api::redeem_native_authorization_code(
+        &env,
+        canister_id,
+        &redeem_request(
+            &prepared.request_id,
+            &request.redirect_uri,
+            &request.client_id,
+        ),
+    )?
+    .expect("redeem should succeed");
 
     env.advance_time(Duration::from_secs(NATIVE_REQUEST_TTL_SECS + 1));
     env.tick();
 
-    let recovered = api::prepare_native_authorization(&env, canister_id, &request)?;
-    assert!(recovered.is_ok());
+    let exchange = api::exchange_native_access_token_for_delegation(
+        &env,
+        canister_id,
+        &ExchangeNativeAccessTokenForDelegationRequest {
+            access_token: token_response.access_token,
+        },
+    )?;
+    assert!(matches!(
+        exchange,
+        Err(ExchangeNativeAccessTokenForDelegationError::Expired)
+    ));
+    Ok(())
+}
+
+#[test]
+fn should_return_not_found_for_unknown_access_token() -> Result<(), RejectResponse> {
+    let env = env();
+    let canister_id = install_native_oidc_ii(
+        &env,
+        vec![native_client_config(
+            "com.example.app",
+            vec!["https://app.example.com/callback".to_string()],
+        )],
+    );
+
+    let exchange = api::exchange_native_access_token_for_delegation(
+        &env,
+        canister_id,
+        &ExchangeNativeAccessTokenForDelegationRequest {
+            access_token: "missing-token".to_string(),
+        },
+    )?;
+    assert!(matches!(
+        exchange,
+        Err(ExchangeNativeAccessTokenForDelegationError::NotFound)
+    ));
+    Ok(())
+}
+
+#[test]
+fn should_expire_authorization_code_before_redeem() -> Result<(), RejectResponse> {
+    let env = env();
+    let request = native_request();
+    let canister_id = install_native_oidc_ii(
+        &env,
+        vec![native_client_config(
+            &request.client_id,
+            vec![request.redirect_uri.clone()],
+        )],
+    );
+    let anchor_number = flows::register_anchor(&env, canister_id);
+    let prepared = api::prepare_native_authorization(&env, canister_id, &request)?
+        .expect("prepare should succeed");
+    api::complete_native_authorization(
+        &env,
+        canister_id,
+        principal_1(),
+        anchor_number,
+        &prepared.request_id,
+        None,
+    )?
+    .expect("completion should succeed");
+    env.advance_time(Duration::from_secs(NATIVE_REQUEST_TTL_SECS + 1));
+    env.tick();
+
+    let result = api::redeem_native_authorization_code(
+        &env,
+        canister_id,
+        &redeem_request(
+            &prepared.request_id,
+            &request.redirect_uri,
+            &request.client_id,
+        ),
+    )?;
+    assert!(matches!(
+        result,
+        Err(RedeemNativeAuthorizationCodeError::InvalidGrant(_))
+    ));
+    Ok(())
+}
+
+#[test]
+fn should_reject_unregistered_client_id() -> Result<(), RejectResponse> {
+    let env = env();
+    let request = native_request();
+    let canister_id = install_native_oidc_ii(
+        &env,
+        vec![native_client_config(
+            "com.example.other",
+            vec!["https://other.example.com/callback".to_string()],
+        )],
+    );
+
+    let result = api::prepare_native_authorization(&env, canister_id, &request)?;
+    assert!(matches!(
+        result,
+        Err(PrepareNativeAuthorizationError::InvalidRequest(_))
+    ));
     Ok(())
 }

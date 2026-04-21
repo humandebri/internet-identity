@@ -48,6 +48,8 @@ const DEFAULT_INIT: InternetIdentityInit = {
   canister_creation_cycles_cost: [],
   captcha_config: [],
   openid_configs: [],
+  native_oidc_clients: [],
+  native_oidc_issuer_origin: [],
   register_rate_limit: [],
   related_origins: [
     [

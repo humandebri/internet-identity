@@ -475,10 +475,6 @@ export interface DummyAuthConfig {
    */
   'prompt_for_index' : boolean,
 }
-export type FetchNativeDelegationResponse = { 'expired' : null } |
-  { 'pending' : null } |
-  { 'not_found' : null } |
-  { 'signed_delegation' : NativeSignedDelegation };
 export type FrontendHostname = string;
 export type GetAccountError = {
     'NoSuchOrigin' : { 'anchor_number' : UserNumber }
@@ -825,6 +821,14 @@ export interface InternetIdentityInit {
    */
   'openid_configs' : [] | [Array<OpenIdConfig>],
   /**
+   * Configurations for native OIDC clients
+   */
+  'native_oidc_clients' : [] | [Array<NativeOidcClientConfig>],
+  /**
+   * Trusted issuer origin used by native OIDC discovery and signed tokens
+   */
+  'native_oidc_issuer_origin' : [] | [string],
+  /**
    * Backend origin, needed to sync configuration with frontend.
    */
   'backend_origin' : [] | [string],
@@ -912,13 +916,35 @@ export type MetadataMapV2 = Array<
   ]
 >;
 export interface NativeAuthorizationRequest {
+  'redirect_uri' : string,
+  'client_id' : string,
+  'state' : string,
+  'scope' : Array<string>,
+  'nonce' : string,
   'origin' : FrontendHostname,
   'max_time_to_live' : [] | [bigint],
   'session_public_key' : SessionKey,
 }
-export interface NativeSignedDelegation {
+export interface RedeemNativeAuthorizationCodeRequest {
+  'grant_type' : string,
+  'code' : string,
+  'redirect_uri' : string,
+  'code_verifier' : string,
+  'client_id' : string,
+}
+export interface RedeemNativeAuthorizationCodeResponse {
+  'access_token' : string,
+  'token_type' : string,
+  'expires_in' : bigint,
+  'id_token' : string,
+}
+export interface ExchangeNativeAccessTokenForDelegationRequest {
+  'access_token' : string,
+}
+export interface ExchangeNativeAccessTokenForDelegationResponse {
   'user_key' : UserKey,
   'signed_delegation' : SignedDelegation,
+  'expiration' : Timestamp,
 }
 export interface OpenIDRegFinishArg {
   'jwt' : JWT,
@@ -936,6 +962,16 @@ export interface OpenIdConfig {
   'auth_scope' : Array<string>,
   'client_id' : string,
 }
+export type NativeOidcApplicationType = { 'native' : null };
+export interface NativeOidcClientConfig {
+  'client_id' : string,
+  'redirect_uris' : Array<string>,
+  'allowed_origins' : Array<string>,
+  'application_type' : NativeOidcApplicationType,
+  'token_endpoint_auth_method' : NativeOidcTokenEndpointAuthMethod,
+  'require_pkce' : boolean,
+}
+export type NativeOidcTokenEndpointAuthMethod = { 'none' : null };
 export interface OpenIdCredential {
   'aud' : Aud,
   'iss' : Iss,
@@ -1060,13 +1096,22 @@ export interface PrepareIdAliasRequest {
 export type PrepareNativeAuthorizationError = {
     'internal_canister_error' : string
   } |
+  { 'invalid_request' : string } |
   { 'too_many_requests' : null } |
-  { 'invalid_return_link' : string } |
+  { 'invalid_redirect_uri' : string } |
   { 'invalid_origin' : string };
 export interface PrepareNativeAuthorizationRequest {
+  'client_id' : string,
+  'scope' : Array<string>,
+  'nonce' : string,
+  'code_challenge_method' : string,
+  'state' : string,
+  'redirect_uri' : string,
+  'response_type' : string,
+  'response_mode' : string,
   'ii_origin' : string,
   'origin' : FrontendHostname,
-  'return_link' : string,
+  'code_challenge' : string,
   'max_time_to_live' : [] | [bigint],
   'session_public_key' : SessionKey,
 }
@@ -1075,6 +1120,18 @@ export interface PrepareNativeAuthorizationResponse {
   'authorize_url' : string,
   'expires_at' : Timestamp,
 }
+export type RedeemNativeAuthorizationCodeError = {
+    'invalid_grant' : string
+  } |
+  { 'invalid_request' : string } |
+  { 'unsupported_grant_type' : string } |
+  { 'internal_canister_error' : string };
+export type ExchangeNativeAccessTokenForDelegationError = {
+    'invalid_token' : string
+  } |
+  { 'expired' : null } |
+  { 'not_found' : null } |
+  { 'internal_canister_error' : string };
 /**
  * The prepared id alias contains two (still unsigned) credentials in JWT format,
  * certifying the id alias for the issuer resp. the relying party.
@@ -1350,6 +1407,16 @@ export interface _SERVICE {
     { 'Ok' : CompleteNativeAuthorizationResponse } |
       { 'Err' : CompleteNativeAuthorizationError }
   >,
+  'redeem_native_authorization_code' : ActorMethod<
+    [RedeemNativeAuthorizationCodeRequest],
+    { 'Ok' : RedeemNativeAuthorizationCodeResponse } |
+      { 'Err' : RedeemNativeAuthorizationCodeError }
+  >,
+  'exchange_native_access_token_for_delegation' : ActorMethod<
+    [ExchangeNativeAccessTokenForDelegationRequest],
+    { 'Ok' : ExchangeNativeAccessTokenForDelegationResponse } |
+      { 'Err' : ExchangeNativeAccessTokenForDelegationError }
+  >,
   'config' : ActorMethod<[], InternetIdentityInit>,
   'create_account' : ActorMethod<
     [UserNumber, FrontendHostname, string],
@@ -1370,10 +1437,6 @@ export interface _SERVICE {
    * Only callable by this IIs archive canister.
    */
   'fetch_entries' : ActorMethod<[], Array<BufferedArchiveEntry>>,
-  'fetch_native_delegation' : ActorMethod<
-    [string],
-    FetchNativeDelegationResponse
-  >,
   'get_account_delegation' : ActorMethod<
     [UserNumber, FrontendHostname, [] | [AccountNumber], SessionKey, Timestamp],
     { 'Ok' : SignedDelegation } |
@@ -1424,6 +1487,7 @@ export interface _SERVICE {
    * =====================
    */
   'http_request' : ActorMethod<[HttpRequest], HttpResponse>,
+  'http_request_update' : ActorMethod<[HttpRequest], HttpResponse>,
   /**
    * Returns information about the authentication methods of the identity with the given number.
    * Only returns the minimal information required for authentication without exposing any metadata such as aliases.

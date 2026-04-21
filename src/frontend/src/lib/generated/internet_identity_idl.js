@@ -31,6 +31,16 @@ export const idlFactory = ({ IDL }) => {
     'auth_scope' : IDL.Vec(IDL.Text),
     'client_id' : IDL.Text,
   });
+  const NativeOidcApplicationType = IDL.Variant({ 'native' : IDL.Null });
+  const NativeOidcTokenEndpointAuthMethod = IDL.Variant({ 'none' : IDL.Null });
+  const NativeOidcClientConfig = IDL.Record({
+    'client_id' : IDL.Text,
+    'redirect_uris' : IDL.Vec(IDL.Text),
+    'allowed_origins' : IDL.Vec(IDL.Text),
+    'application_type' : NativeOidcApplicationType,
+    'token_endpoint_auth_method' : NativeOidcTokenEndpointAuthMethod,
+    'require_pkce' : IDL.Bool,
+  });
   const CaptchaConfig = IDL.Record({
     'max_unsolved_captchas' : IDL.Nat64,
     'captcha_trigger' : IDL.Variant({
@@ -61,6 +71,8 @@ export const idlFactory = ({ IDL }) => {
     'analytics_config' : IDL.Opt(IDL.Opt(AnalyticsConfig)),
     'related_origins' : IDL.Opt(IDL.Vec(IDL.Text)),
     'openid_configs' : IDL.Opt(IDL.Vec(OpenIdConfig)),
+    'native_oidc_clients' : IDL.Opt(IDL.Vec(NativeOidcClientConfig)),
+    'native_oidc_issuer_origin' : IDL.Opt(IDL.Text),
     'backend_origin' : IDL.Opt(IDL.Text),
     'captcha_config' : IDL.Opt(CaptchaConfig),
     'dummy_auth' : IDL.Opt(IDL.Opt(DummyAuthConfig)),
@@ -272,16 +284,6 @@ export const idlFactory = ({ IDL }) => {
     'signature' : IDL.Vec(IDL.Nat8),
     'delegation' : Delegation,
   });
-  const NativeSignedDelegation = IDL.Record({
-    'user_key' : UserKey,
-    'signed_delegation' : SignedDelegation,
-  });
-  const FetchNativeDelegationResponse = IDL.Variant({
-    'expired' : IDL.Null,
-    'pending' : IDL.Null,
-    'not_found' : IDL.Null,
-    'signed_delegation' : NativeSignedDelegation,
-  });
   const SessionKey = PublicKey;
   const AccountDelegationError = IDL.Variant({
     'NoSuchDelegation' : IDL.Null,
@@ -410,6 +412,11 @@ export const idlFactory = ({ IDL }) => {
     'NoSuchCredentials' : IDL.Text,
   });
   const NativeAuthorizationRequest = IDL.Record({
+    'redirect_uri' : IDL.Text,
+    'client_id' : IDL.Text,
+    'state' : IDL.Text,
+    'scope' : IDL.Vec(IDL.Text),
+    'nonce' : IDL.Text,
     'origin' : FrontendHostname,
     'max_time_to_live' : IDL.Opt(IDL.Nat64),
     'session_public_key' : SessionKey,
@@ -589,8 +596,16 @@ export const idlFactory = ({ IDL }) => {
     'Unauthorized' : IDL.Principal,
   });
   const PrepareNativeAuthorizationRequest = IDL.Record({
+    'client_id' : IDL.Text,
+    'scope' : IDL.Vec(IDL.Text),
+    'nonce' : IDL.Text,
+    'code_challenge_method' : IDL.Text,
+    'state' : IDL.Text,
+    'redirect_uri' : IDL.Text,
+    'response_type' : IDL.Text,
+    'response_mode' : IDL.Text,
     'origin' : FrontendHostname,
-    'return_link' : IDL.Text,
+    'code_challenge' : IDL.Text,
     'max_time_to_live' : IDL.Opt(IDL.Nat64),
     'session_public_key' : SessionKey,
     'ii_origin' : IDL.Text,
@@ -602,9 +617,43 @@ export const idlFactory = ({ IDL }) => {
   });
   const PrepareNativeAuthorizationError = IDL.Variant({
     'internal_canister_error' : IDL.Text,
+    'invalid_request' : IDL.Text,
     'too_many_requests' : IDL.Null,
-    'invalid_return_link' : IDL.Text,
+    'invalid_redirect_uri' : IDL.Text,
     'invalid_origin' : IDL.Text,
+  });
+  const RedeemNativeAuthorizationCodeRequest = IDL.Record({
+    'grant_type' : IDL.Text,
+    'code' : IDL.Text,
+    'redirect_uri' : IDL.Text,
+    'code_verifier' : IDL.Text,
+    'client_id' : IDL.Text,
+  });
+  const RedeemNativeAuthorizationCodeResponse = IDL.Record({
+    'access_token' : IDL.Text,
+    'token_type' : IDL.Text,
+    'expires_in' : IDL.Nat64,
+    'id_token' : IDL.Text,
+  });
+  const RedeemNativeAuthorizationCodeError = IDL.Variant({
+    'invalid_grant' : IDL.Text,
+    'invalid_request' : IDL.Text,
+    'unsupported_grant_type' : IDL.Text,
+    'internal_canister_error' : IDL.Text,
+  });
+  const ExchangeNativeAccessTokenForDelegationRequest = IDL.Record({
+    'access_token' : IDL.Text,
+  });
+  const ExchangeNativeAccessTokenForDelegationResponse = IDL.Record({
+    'user_key' : UserKey,
+    'signed_delegation' : SignedDelegation,
+    'expiration' : Timestamp,
+  });
+  const ExchangeNativeAccessTokenForDelegationError = IDL.Variant({
+    'invalid_token' : IDL.Text,
+    'expired' : IDL.Null,
+    'not_found' : IDL.Null,
+    'internal_canister_error' : IDL.Text,
   });
   const ChallengeResult = IDL.Record({
     'key' : ChallengeKey,
@@ -770,6 +819,26 @@ export const idlFactory = ({ IDL }) => {
         ],
         [],
       ),
+    'redeem_native_authorization_code' : IDL.Func(
+        [RedeemNativeAuthorizationCodeRequest],
+        [
+          IDL.Variant({
+            'Ok' : RedeemNativeAuthorizationCodeResponse,
+            'Err' : RedeemNativeAuthorizationCodeError,
+          }),
+        ],
+        [],
+      ),
+    'exchange_native_access_token_for_delegation' : IDL.Func(
+        [ExchangeNativeAccessTokenForDelegationRequest],
+        [
+          IDL.Variant({
+            'Ok' : ExchangeNativeAccessTokenForDelegationResponse,
+            'Err' : ExchangeNativeAccessTokenForDelegationError,
+          }),
+        ],
+        ['query'],
+      ),
     'config' : IDL.Func([], [InternetIdentityInit], ['query']),
     'create_account' : IDL.Func(
         [UserNumber, FrontendHostname, IDL.Text],
@@ -781,11 +850,6 @@ export const idlFactory = ({ IDL }) => {
     'enter_device_registration_mode' : IDL.Func([UserNumber], [Timestamp], []),
     'exit_device_registration_mode' : IDL.Func([UserNumber], [], []),
     'fetch_entries' : IDL.Func([], [IDL.Vec(BufferedArchiveEntry)], []),
-    'fetch_native_delegation' : IDL.Func(
-        [IDL.Text],
-        [FetchNativeDelegationResponse],
-        ['query'],
-      ),
     'get_account_delegation' : IDL.Func(
         [
           UserNumber,
@@ -869,6 +933,7 @@ export const idlFactory = ({ IDL }) => {
         ['query'],
       ),
     'http_request' : IDL.Func([HttpRequest], [HttpResponse], ['query']),
+    'http_request_update' : IDL.Func([HttpRequest], [HttpResponse], []),
     'identity_authn_info' : IDL.Func(
         [IdentityNumber],
         [IDL.Variant({ 'Ok' : IdentityAuthnInfo, 'Err' : IDL.Null })],
@@ -1084,6 +1149,16 @@ export const init = ({ IDL }) => {
     'auth_scope' : IDL.Vec(IDL.Text),
     'client_id' : IDL.Text,
   });
+  const NativeOidcApplicationType = IDL.Variant({ 'native' : IDL.Null });
+  const NativeOidcTokenEndpointAuthMethod = IDL.Variant({ 'none' : IDL.Null });
+  const NativeOidcClientConfig = IDL.Record({
+    'client_id' : IDL.Text,
+    'redirect_uris' : IDL.Vec(IDL.Text),
+    'allowed_origins' : IDL.Vec(IDL.Text),
+    'application_type' : NativeOidcApplicationType,
+    'token_endpoint_auth_method' : NativeOidcTokenEndpointAuthMethod,
+    'require_pkce' : IDL.Bool,
+  });
   const CaptchaConfig = IDL.Record({
     'max_unsolved_captchas' : IDL.Nat64,
     'captcha_trigger' : IDL.Variant({
@@ -1114,6 +1189,8 @@ export const init = ({ IDL }) => {
     'analytics_config' : IDL.Opt(IDL.Opt(AnalyticsConfig)),
     'related_origins' : IDL.Opt(IDL.Vec(IDL.Text)),
     'openid_configs' : IDL.Opt(IDL.Vec(OpenIdConfig)),
+    'native_oidc_clients' : IDL.Opt(IDL.Vec(NativeOidcClientConfig)),
+    'native_oidc_issuer_origin' : IDL.Opt(IDL.Text),
     'backend_origin' : IDL.Opt(IDL.Text),
     'captcha_config' : IDL.Opt(CaptchaConfig),
     'dummy_auth' : IDL.Opt(IDL.Opt(DummyAuthConfig)),

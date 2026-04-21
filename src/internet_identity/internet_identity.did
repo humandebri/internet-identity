@@ -176,7 +176,15 @@ type PrepareNativeAuthorizationRequest = record {
     origin : FrontendHostname;
     ii_origin : text;
     session_public_key : SessionKey;
-    return_link : text;
+    redirect_uri : text;
+    client_id : text;
+    state : text;
+    scope : vec text;
+    nonce : text;
+    code_challenge : text;
+    code_challenge_method : text;
+    response_type : text;
+    response_mode : text;
     max_time_to_live : opt nat64;
 };
 
@@ -188,6 +196,11 @@ type PrepareNativeAuthorizationResponse = record {
 
 type NativeAuthorizationRequest = record {
     origin : FrontendHostname;
+    redirect_uri : text;
+    client_id : text;
+    state : text;
+    scope : vec text;
+    nonce : text;
     session_public_key : SessionKey;
     max_time_to_live : opt nat64;
 };
@@ -196,21 +209,35 @@ type CompleteNativeAuthorizationResponse = record {
     redirect_url : text;
 };
 
-type NativeSignedDelegation = record {
-    user_key : UserKey;
-    signed_delegation : SignedDelegation;
+type RedeemNativeAuthorizationCodeRequest = record {
+    grant_type : text;
+    code : text;
+    redirect_uri : text;
+    code_verifier : text;
+    client_id : text;
 };
 
-type FetchNativeDelegationResponse = variant {
-    pending;
-    signed_delegation : NativeSignedDelegation;
-    expired;
-    not_found;
+type RedeemNativeAuthorizationCodeResponse = record {
+    access_token : text;
+    token_type : text;
+    expires_in : nat64;
+    id_token : text;
+};
+
+type ExchangeNativeAccessTokenForDelegationRequest = record {
+    access_token : text;
+};
+
+type ExchangeNativeAccessTokenForDelegationResponse = record {
+    user_key : UserKey;
+    signed_delegation : SignedDelegation;
+    expiration : Timestamp;
 };
 
 type PrepareNativeAuthorizationError = variant {
     invalid_origin : text;
-    invalid_return_link : text;
+    invalid_redirect_uri : text;
+    invalid_request : text;
     too_many_requests;
     internal_canister_error : text;
 };
@@ -226,6 +253,20 @@ type CompleteNativeAuthorizationError = variant {
     not_found;
     expired;
     already_completed;
+    internal_canister_error : text;
+};
+
+type RedeemNativeAuthorizationCodeError = variant {
+    invalid_grant : text;
+    invalid_request : text;
+    unsupported_grant_type : text;
+    internal_canister_error : text;
+};
+
+type ExchangeNativeAccessTokenForDelegationError = variant {
+    invalid_token : text;
+    expired;
+    not_found;
     internal_canister_error : text;
 };
 
@@ -337,6 +378,10 @@ type InternetIdentityInit = record {
     new_flow_origins : opt vec text;
     // Configurations for OpenID clients
     openid_configs : opt vec OpenIdConfig;
+    // Configurations for native OIDC clients
+    native_oidc_clients : opt vec NativeOidcClientConfig;
+    // Trusted issuer origin used by native OIDC discovery and signed tokens
+    native_oidc_issuer_origin : opt text;
     // Configuration for Web Analytics
     analytics_config : opt opt AnalyticsConfig;
     // Configuration to show dapps explorer or not
@@ -438,6 +483,23 @@ type OpenIdConfig = record {
     auth_scope : vec text;
     fedcm_uri : opt text;
     email_verification : opt OpenIdEmailVerification;
+};
+
+type NativeOidcApplicationType = variant {
+    native;
+};
+
+type NativeOidcTokenEndpointAuthMethod = variant {
+    none;
+};
+
+type NativeOidcClientConfig = record {
+    client_id : text;
+    redirect_uris : vec text;
+    allowed_origins : vec text;
+    application_type : NativeOidcApplicationType;
+    token_endpoint_auth_method : NativeOidcTokenEndpointAuthMethod;
+    require_pkce : bool;
 };
 
 type OpenIdCredentialKey = record { Iss; Sub };
@@ -1209,8 +1271,17 @@ service : (opt InternetIdentityInit) -> {
         request_id : text,
         account_number : opt AccountNumber
     ) -> (variant { Ok : CompleteNativeAuthorizationResponse; Err : CompleteNativeAuthorizationError });
-    fetch_native_delegation : (request_id : text) -> (FetchNativeDelegationResponse) query;
-
+    redeem_native_authorization_code : (
+        RedeemNativeAuthorizationCodeRequest
+    ) -> (variant { Ok : RedeemNativeAuthorizationCodeResponse; Err : RedeemNativeAuthorizationCodeError });
+    exchange_native_access_token_for_delegation : (
+        ExchangeNativeAccessTokenForDelegationRequest
+    ) -> (
+        variant {
+            Ok : ExchangeNativeAccessTokenForDelegationResponse;
+            Err : ExchangeNativeAccessTokenForDelegationError;
+        }
+    ) query;
     // Attribute sharing protocol
     // ==========================
     prepare_attributes : (PrepareAttributeRequest) -> (variant { Ok : PrepareAttributeResponse; Err : PrepareAttributeError });
@@ -1239,6 +1310,7 @@ service : (opt InternetIdentityInit) -> {
     // HTTP Gateway protocol
     // =====================
     http_request : (request : HttpRequest) -> (HttpResponse) query;
+    http_request_update : (request : HttpRequest) -> (HttpResponse);
 
     // Internal Methods
     // ================

@@ -117,6 +117,10 @@ pub struct PersistentState {
     pub new_flow_origins: Option<Vec<String>>,
     // Configurations for OpenID clients
     pub openid_configs: Option<Vec<OpenIdConfig>>,
+    // Configurations for native OIDC clients
+    pub native_oidc_clients: Option<Vec<NativeOidcClientConfig>>,
+    // Trusted issuer origin used by native OIDC discovery and signed tokens
+    pub native_oidc_issuer_origin: Option<String>,
     // Configuration for Web Analytics tool
     pub analytics_config: Option<AnalyticsConfig>,
     // Key into the event_data BTreeMap where the 24h tracking window starts.
@@ -143,6 +147,8 @@ impl Default for PersistentState {
             related_origins: None,
             new_flow_origins: None,
             openid_configs: None,
+            native_oidc_clients: None,
+            native_oidc_issuer_origin: None,
             analytics_config: None,
             event_stats_24h_start: None,
             enable_dapps_explorer: None,
