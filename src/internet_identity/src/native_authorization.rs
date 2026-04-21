@@ -38,7 +38,8 @@ const ORIGIN_MAX_BYTES: usize = 255;
 const STATE_MAX_BYTES: usize = 512;
 const NONCE_MAX_BYTES: usize = 512;
 const CLIENT_ID_MAX_BYTES: usize = 255;
-const PKCE_MAX_BYTES: usize = 255;
+const PKCE_MIN_BYTES: usize = 43;
+const PKCE_MAX_BYTES: usize = 128;
 const PENDING_REQUEST_TTL_NS: u64 = 5 * 60 * 1_000_000_000;
 const CODE_TTL_NS: u64 = 5 * 60 * 1_000_000_000;
 const COMPLETED_REQUEST_GRACE_PERIOD_NS: u64 = 10 * 60 * 1_000_000_000;
@@ -270,11 +271,16 @@ pub async fn redeem_code(
             "redirect_uri is not registered for client_id".to_string(),
         ));
     }
-    validate_pkce(
+    if let Err(err) = validate_pkce(
         &record.code_challenge_method,
         &record.code_challenge,
         &request.code_verifier,
-    )?;
+    ) {
+        state::native_authorizations_mut(|native_authorizations| {
+            native_authorizations.invalidate_code(&request.code, now);
+        });
+        return Err(err);
+    }
 
     let access_token = random_token(TOKEN_NUM_BYTES).await.map_err(|err| {
         RedeemNativeAuthorizationCodeError::InternalCanisterError(format!(
@@ -422,7 +428,7 @@ fn validate_prepare_request(
     validate_scopes(&request.scope).map_err(PrepareNativeAuthorizationError::InvalidRequest)?;
     validate_scalar_field("nonce", &request.nonce, NONCE_MAX_BYTES)
         .map_err(PrepareNativeAuthorizationError::InvalidRequest)?;
-    validate_code_challenge(&request.code_challenge)
+    validate_code_challenge_value(&request.code_challenge)
         .map_err(PrepareNativeAuthorizationError::InvalidRequest)?;
     if request.code_challenge_method != "S256" {
         return Err(PrepareNativeAuthorizationError::InvalidRequest(
@@ -487,7 +493,7 @@ fn validate_redeem_request(
         .map_err(RedeemNativeAuthorizationCodeError::InvalidRequest)?;
     validate_client_id(&request.client_id)
         .map_err(RedeemNativeAuthorizationCodeError::InvalidRequest)?;
-    validate_code_challenge(&request.code_verifier)
+    validate_code_verifier_value(&request.code_verifier)
         .map_err(RedeemNativeAuthorizationCodeError::InvalidRequest)?;
     Ok(())
 }
@@ -556,13 +562,26 @@ fn validate_scalar_field(field_name: &str, value: &str, max_len: usize) -> Resul
     Ok(())
 }
 
-fn validate_code_challenge(value: &str) -> Result<(), String> {
-    validate_scalar_field("code challenge", value, PKCE_MAX_BYTES)?;
+fn validate_code_challenge_value(value: &str) -> Result<(), String> {
+    validate_pkce_component("code_challenge", value)
+}
+
+fn validate_code_verifier_value(value: &str) -> Result<(), String> {
+    validate_pkce_component("code_verifier", value)
+}
+
+fn validate_pkce_component(field_name: &str, value: &str) -> Result<(), String> {
+    validate_scalar_field(field_name, value, PKCE_MAX_BYTES)?;
+    if value.len() < PKCE_MIN_BYTES {
+        return Err(format!(
+            "{field_name} must be at least {PKCE_MIN_BYTES} bytes"
+        ));
+    }
     if !value
         .bytes()
         .all(|byte| byte.is_ascii_alphanumeric() || b"-._~".contains(&byte))
     {
-        return Err("code challenge must use unreserved URI characters".to_string());
+        return Err(format!("{field_name} must use unreserved URI characters"));
     }
     Ok(())
 }

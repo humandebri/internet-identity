@@ -113,12 +113,11 @@ export const fetchIcDelegation = async (
   delegationChain: DelegationChain;
 }> => {
   const delegationEndpoint = await resolveDelegationEndpoint(input);
-  const url = new URL(delegationEndpoint);
-  url.searchParams.set("access_token", input.accessToken);
-  const response = await (input.fetchFn ?? fetch)(url.toString(), {
+  const response = await (input.fetchFn ?? fetch)(delegationEndpoint, {
     method: "GET",
     headers: {
       Accept: "application/json",
+      Authorization: `Bearer ${input.accessToken}`,
     },
   });
   const { body } = await readJsonText(response, "delegation");

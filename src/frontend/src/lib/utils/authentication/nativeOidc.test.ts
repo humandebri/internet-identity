@@ -121,8 +121,14 @@ describe("nativeOidc", () => {
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      "https://identity.ic0.app/oauth2/delegation?access_token=native-access-token",
-      expect.objectContaining({ method: "GET" }),
+      "https://identity.ic0.app/oauth2/delegation",
+      expect.objectContaining({
+        method: "GET",
+        headers: expect.objectContaining({
+          Accept: "application/json",
+          Authorization: "Bearer native-access-token",
+        }),
+      }),
     );
     expect(delegationResponse.expiration).toBe(BigInt("1844674407370955161"));
     expect(delegationResponse.signed_delegation.delegation.expiration).toBe(
@@ -148,8 +154,14 @@ describe("nativeOidc", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://gateway.example/oauth2/delegation?access_token=native-access-token",
-      expect.objectContaining({ method: "GET" }),
+      "https://gateway.example/oauth2/delegation",
+      expect.objectContaining({
+        method: "GET",
+        headers: expect.objectContaining({
+          Accept: "application/json",
+          Authorization: "Bearer native-access-token",
+        }),
+      }),
     );
     const parsedTargets =
       delegationResponse.signed_delegation.delegation.targets[0];
@@ -250,12 +262,22 @@ describe("nativeOidc", () => {
     expect(notFoundFetch).toHaveBeenCalledTimes(1);
     expect(invalidTokenFetch).toHaveBeenCalledTimes(1);
     expect(notFoundFetch).toHaveBeenCalledWith(
-      "https://identity.ic0.app/oauth2/delegation?access_token=missing-token",
-      expect.objectContaining({ method: "GET" }),
+      "https://identity.ic0.app/oauth2/delegation",
+      expect.objectContaining({
+        method: "GET",
+        headers: expect.objectContaining({
+          Authorization: "Bearer missing-token",
+        }),
+      }),
     );
     expect(invalidTokenFetch).toHaveBeenCalledWith(
-      "https://identity.ic0.app/oauth2/delegation?access_token=invalid-token",
-      expect.objectContaining({ method: "GET" }),
+      "https://identity.ic0.app/oauth2/delegation",
+      expect.objectContaining({
+        method: "GET",
+        headers: expect.objectContaining({
+          Authorization: "Bearer invalid-token",
+        }),
+      }),
     );
   });
 

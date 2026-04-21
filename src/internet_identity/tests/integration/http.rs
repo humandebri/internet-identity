@@ -1007,7 +1007,7 @@ fn ii_canister_serves_openid_configuration_and_jwks() -> Result<(), RejectRespon
 fn ii_canister_serves_native_oidc_token_and_delegation_http_endpoints() -> Result<(), RejectResponse>
 {
     let env = env();
-    let verifier = "native-pkce-verifier";
+    let verifier = "native-browser-authorization-pkce-verifier-value";
     let client_id = "com.example.app";
     let redirect_uri = "https://app.example.com/callback";
     let mut init_arg = arg_with_wasm_hash(ARCHIVE_WASM.clone()).unwrap();
@@ -1073,26 +1073,189 @@ fn ii_canister_serves_native_oidc_token_and_delegation_http_endpoints() -> Resul
     let token_response = http_request_update(&env, canister_id, &token_request)?;
     assert_eq!(token_response.status_code, 200);
     assert_cors_header(&token_response.headers);
+    assert_no_store_headers(&token_response.headers);
     let token_json: Value =
         serde_json::from_slice(&token_response.body).expect("token response should parse");
     let access_token = token_json["access_token"]
         .as_str()
         .expect("access_token should be present");
 
+    let delegation_preflight_response = http_request(
+        &env,
+        canister_id,
+        &HttpRequest {
+            method: "OPTIONS".to_string(),
+            url: "/oauth2/delegation".to_string(),
+            headers: vec![],
+            body: ByteBuf::new(),
+            certificate_version: None,
+        },
+    )?;
+    assert_eq!(delegation_preflight_response.status_code, 204);
+    assert_cors_header(&delegation_preflight_response.headers);
+    assert_header_value(
+        &delegation_preflight_response.headers,
+        "Access-Control-Allow-Methods",
+        "GET, POST, OPTIONS",
+    );
+    assert_header_value(
+        &delegation_preflight_response.headers,
+        "Access-Control-Allow-Headers",
+        "authorization, content-type",
+    );
+
+    let token_preflight_response = http_request(
+        &env,
+        canister_id,
+        &HttpRequest {
+            method: "OPTIONS".to_string(),
+            url: "/oauth2/token".to_string(),
+            headers: vec![],
+            body: ByteBuf::new(),
+            certificate_version: None,
+        },
+    )?;
+    assert_eq!(token_preflight_response.status_code, 204);
+    assert_cors_header(&token_preflight_response.headers);
+    assert_header_value(
+        &token_preflight_response.headers,
+        "Access-Control-Allow-Methods",
+        "GET, POST, OPTIONS",
+    );
+    assert_header_value(
+        &token_preflight_response.headers,
+        "Access-Control-Allow-Headers",
+        "authorization, content-type",
+    );
+
     let delegation_request = HttpRequest {
         method: "GET".to_string(),
-        url: format!("/oauth2/delegation?access_token={access_token}"),
-        headers: vec![],
+        url: "/oauth2/delegation".to_string(),
+        headers: vec![(
+            "Authorization".to_string(),
+            format!("Bearer {access_token}"),
+        )],
         body: ByteBuf::new(),
         certificate_version: None,
     };
     let delegation_response = http_request(&env, canister_id, &delegation_request)?;
     assert_eq!(delegation_response.status_code, 200);
     assert_cors_header(&delegation_response.headers);
+    assert_no_store_headers(&delegation_response.headers);
     let delegation_json: Value = serde_json::from_slice(&delegation_response.body)
         .expect("delegation response should parse");
     assert!(delegation_json.get("user_key").is_some());
     assert!(delegation_json.get("signed_delegation").is_some());
+
+    let query_fallback_response = http_request(
+        &env,
+        canister_id,
+        &HttpRequest {
+            method: "GET".to_string(),
+            url: format!("/oauth2/delegation?access_token={access_token}"),
+            headers: vec![],
+            body: ByteBuf::new(),
+            certificate_version: None,
+        },
+    )?;
+    assert_eq!(query_fallback_response.status_code, 200);
+    assert_no_store_headers(&query_fallback_response.headers);
+
+    let header_precedence_response = http_request(
+        &env,
+        canister_id,
+        &HttpRequest {
+            method: "GET".to_string(),
+            url: "/oauth2/delegation?access_token=wrong-token".to_string(),
+            headers: vec![(
+                "Authorization".to_string(),
+                format!("Bearer {access_token}"),
+            )],
+            body: ByteBuf::new(),
+            certificate_version: None,
+        },
+    )?;
+    assert_eq!(header_precedence_response.status_code, 200);
+    assert_no_store_headers(&header_precedence_response.headers);
+
+    let token_error_response = http_request_update(
+        &env,
+        canister_id,
+        &HttpRequest {
+            method: "POST".to_string(),
+            url: "/oauth2/token".to_string(),
+            headers: vec![(
+                "Content-Type".to_string(),
+                "application/x-www-form-urlencoded".to_string(),
+            )],
+            body: ByteBuf::from(
+                format!(
+                    "grant_type=authorization_code&code={}&redirect_uri={}&client_id={}",
+                    prepared.request_id, redirect_uri, client_id
+                )
+                .into_bytes(),
+            ),
+            certificate_version: None,
+        },
+    )?;
+    assert_eq!(token_error_response.status_code, 400);
+    assert_no_store_headers(&token_error_response.headers);
+
+    let delegation_error_response = http_request(
+        &env,
+        canister_id,
+        &HttpRequest {
+            method: "GET".to_string(),
+            url: "/oauth2/delegation?access_token=missing-token".to_string(),
+            headers: vec![],
+            body: ByteBuf::new(),
+            certificate_version: None,
+        },
+    )?;
+    assert_eq!(delegation_error_response.status_code, 404);
+    assert_no_store_headers(&delegation_error_response.headers);
+
+    let delegation_missing_token_response = http_request(
+        &env,
+        canister_id,
+        &HttpRequest {
+            method: "GET".to_string(),
+            url: "/oauth2/delegation".to_string(),
+            headers: vec![],
+            body: ByteBuf::new(),
+            certificate_version: None,
+        },
+    )?;
+    assert_eq!(delegation_missing_token_response.status_code, 400);
+    assert_no_store_headers(&delegation_missing_token_response.headers);
+
+    let token_method_response = http_request(
+        &env,
+        canister_id,
+        &HttpRequest {
+            method: "GET".to_string(),
+            url: "/oauth2/token".to_string(),
+            headers: vec![],
+            body: ByteBuf::new(),
+            certificate_version: None,
+        },
+    )?;
+    assert_eq!(token_method_response.status_code, 405);
+    assert_header_value(&token_method_response.headers, "Allow", "POST, OPTIONS");
+
+    let delegation_method_response = http_request_update(
+        &env,
+        canister_id,
+        &HttpRequest {
+            method: "POST".to_string(),
+            url: "/oauth2/delegation".to_string(),
+            headers: vec![],
+            body: ByteBuf::new(),
+            certificate_version: None,
+        },
+    )?;
+    assert_eq!(delegation_method_response.status_code, 405);
+    assert_header_value(&delegation_method_response.headers, "Allow", "GET, OPTIONS");
 
     Ok(())
 }
@@ -1124,4 +1287,17 @@ fn assert_cors_header(headers: &[(String, String)]) {
         .find(|(name, _)| name.eq_ignore_ascii_case("access-control-allow-origin"))
         .expect("Access-Control-Allow-Origin header not found");
     assert_eq!(value, "*");
+}
+
+fn assert_no_store_headers(headers: &[(String, String)]) {
+    assert_header_value(headers, "Cache-Control", "no-store, no-cache, max-age=0");
+    assert_header_value(headers, "Pragma", "no-cache");
+}
+
+fn assert_header_value(headers: &[(String, String)], name: &str, expected: &str) {
+    let (_, value) = headers
+        .iter()
+        .find(|(header_name, _)| header_name.eq_ignore_ascii_case(name))
+        .unwrap_or_else(|| panic!("{name} header not found"));
+    assert_eq!(value, expected);
 }

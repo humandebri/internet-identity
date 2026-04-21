@@ -218,6 +218,18 @@ impl NativeAuthorizationState {
         Ok(())
     }
 
+    pub fn invalidate_code(&mut self, request_id: &str, now: Timestamp) {
+        let Some(record) = self.records.get_mut(request_id) else {
+            return;
+        };
+        let NativeAuthorizationStatus::Authorized(authorized) = &mut record.status else {
+            return;
+        };
+        if authorized.redeemed_at.is_none() {
+            authorized.redeemed_at = Some(now);
+        }
+    }
+
     pub fn prune_expired(&mut self, now: Timestamp) {
         self.records.retain(|_, record| record.expires_at > now);
         self.access_tokens
@@ -302,6 +314,23 @@ mod tests {
         state
             .issue_access_token("request", "token".to_string(), token_record, 20)
             .unwrap();
+        assert!(matches!(
+            state.authorized_code("request", 21),
+            Err(RedeemNativeAuthorizationCodeError::InvalidGrant(_))
+        ));
+    }
+
+    #[test]
+    fn should_invalidate_authorization_code() {
+        let mut state = NativeAuthorizationState::default();
+        state.insert("request".to_string(), record()).unwrap();
+        state.claim_for_completion("request", 10).unwrap();
+        state
+            .complete_claimed("request", authorized(), 200)
+            .expect("complete should succeed");
+
+        state.invalidate_code("request", 20);
+
         assert!(matches!(
             state.authorized_code("request", 21),
             Err(RedeemNativeAuthorizationCodeError::InvalidGrant(_))

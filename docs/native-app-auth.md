@@ -34,7 +34,7 @@ Frontend code now has a thin utility at
   - Can use an explicit `tokenEndpoint` without discovery.
 - Calls `POST /oauth2/token`.
 - `fetchIcDelegation(...)`
-  - Uses `access_token` with `GET /oauth2/delegation?access_token=...`.
+  - Uses `Authorization: Bearer <access_token>` with `GET /oauth2/delegation`.
   - Converts the response into a frontend `DelegationChain`.
   - Can use an explicit `delegationEndpoint` without discovery.
 - `completeNativeOidcLogin(...)`
@@ -128,6 +128,18 @@ response was received.
 
 Native OIDC HTTP responses are cross-origin readable and return
 `Access-Control-Allow-Origin: *` on discovery, token, delegation, and JWKS.
+`/oauth2/token` and `/oauth2/delegation` also return `Cache-Control: no-store, no-cache, max-age=0`
+and `Pragma: no-cache` because they carry short-lived secrets.
+
+Recommended delegation transport is `GET /oauth2/delegation` with
+`Authorization: Bearer <access_token>`. Certified delegation retrieval still stays on the query
+path, but the token no longer needs to appear in the URL for new clients.
+Browser preflight for the `Authorization` header is supported by II CORS responses.
+
+`GET /oauth2/delegation?access_token=...` remains available as legacy compatibility. The access
+token is a short-lived exchange token, not a general Bearer token, but query transport can still
+surface it in server logs, proxies, or APM systems. Prefer the header transport and avoid copying
+or persisting legacy request URLs.
 
 ## Redirect URI Policy
 
@@ -157,6 +169,7 @@ loopback redirects are validated by URI class, registered `redirect_uri` members
 - `scope` including `openid`
 - `nonce`
 - `code_challenge`
+  - Must satisfy RFC 7636 length bounds: 43-128 characters.
 - `code_challenge_method` set to `S256`
 - `response_type` set to `code`
 - `response_mode` set to `query`
@@ -183,3 +196,5 @@ redirects add one extra check: `origin` must match the redirect origin.
 - `id_token` is signed with II-managed RSA keys and can be verified via `/.well-known/openid-configuration` and `/oauth2/jwks`.
 - `id_token.sub` is pairwise per `client_id`; it is no longer the anchor number.
 - IC delegation is only returned by `exchange_native_access_token_for_delegation`.
+- `code_verifier` must also satisfy RFC 7636 length bounds: 43-128 characters.
+- PKCE mismatch invalidates the authorization code immediately; retry with a corrected verifier does not work.

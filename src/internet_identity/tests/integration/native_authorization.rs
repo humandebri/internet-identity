@@ -15,9 +15,10 @@ use std::time::Duration;
 
 const NATIVE_REQUEST_TTL_SECS: u64 = 5 * 60;
 const DEFAULT_TRUSTED_ISSUER_ORIGIN: &str = "https://identity.internetcomputer.org";
+const PKCE_VERIFIER: &str = "native-browser-authorization-pkce-verifier-value";
+const WRONG_PKCE_VERIFIER: &str = "wrong-browser-authorization-pkce-verifier-value";
 
 fn native_request() -> PrepareNativeAuthorizationRequest {
-    let verifier = "native-pkce-verifier";
     PrepareNativeAuthorizationRequest {
         origin: "https://app.example.com".to_string(),
         ii_origin: "https://identity.test".to_string(),
@@ -27,7 +28,7 @@ fn native_request() -> PrepareNativeAuthorizationRequest {
         state: "state-123".to_string(),
         scope: vec!["openid".to_string()],
         nonce: "nonce-123".to_string(),
-        code_challenge: URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes())),
+        code_challenge: URL_SAFE_NO_PAD.encode(Sha256::digest(PKCE_VERIFIER.as_bytes())),
         code_challenge_method: "S256".to_string(),
         response_type: "code".to_string(),
         response_mode: "query".to_string(),
@@ -44,7 +45,7 @@ fn redeem_request(
         grant_type: "authorization_code".to_string(),
         code: code.to_string(),
         redirect_uri: redirect_uri.to_string(),
-        code_verifier: "native-pkce-verifier".to_string(),
+        code_verifier: PKCE_VERIFIER.to_string(),
         client_id: client_id.to_string(),
     }
 }
@@ -373,6 +374,27 @@ fn should_reject_missing_openid_scope() -> Result<(), RejectResponse> {
 }
 
 #[test]
+fn should_reject_short_code_challenge() -> Result<(), RejectResponse> {
+    let env = env();
+    let mut request = native_request();
+    request.code_challenge = "short-challenge".to_string();
+    let canister_id = install_native_oidc_ii(
+        &env,
+        vec![native_client_config(
+            &request.client_id,
+            vec![request.redirect_uri.clone()],
+        )],
+    );
+
+    let result = api::prepare_native_authorization(&env, canister_id, &request)?;
+    assert!(matches!(
+        result,
+        Err(PrepareNativeAuthorizationError::InvalidRequest(_))
+    ));
+    Ok(())
+}
+
+#[test]
 fn should_percent_encode_state_in_redirect_url() -> Result<(), RejectResponse> {
     let env = env();
     let mut request = native_request();
@@ -408,7 +430,7 @@ fn should_percent_encode_state_in_redirect_url() -> Result<(), RejectResponse> {
 }
 
 #[test]
-fn should_allow_redeem_retry_after_pkce_mismatch() -> Result<(), RejectResponse> {
+fn should_invalidate_code_after_pkce_mismatch() -> Result<(), RejectResponse> {
     let env = env();
     let request = native_request();
     let canister_id = install_native_oidc_ii(
@@ -435,7 +457,7 @@ fn should_allow_redeem_retry_after_pkce_mismatch() -> Result<(), RejectResponse>
         &env,
         canister_id,
         &RedeemNativeAuthorizationCodeRequest {
-            code_verifier: "wrong-verifier".to_string(),
+            code_verifier: WRONG_PKCE_VERIFIER.to_string(),
             ..redeem_request(
                 &prepared.request_id,
                 &request.redirect_uri,
@@ -448,7 +470,7 @@ fn should_allow_redeem_retry_after_pkce_mismatch() -> Result<(), RejectResponse>
         Err(RedeemNativeAuthorizationCodeError::InvalidGrant(_))
     ));
 
-    let valid = api::redeem_native_authorization_code(
+    let retry = api::redeem_native_authorization_code(
         &env,
         canister_id,
         &redeem_request(
@@ -457,7 +479,96 @@ fn should_allow_redeem_retry_after_pkce_mismatch() -> Result<(), RejectResponse>
             &request.client_id,
         ),
     )?;
-    assert!(valid.is_ok());
+    assert!(matches!(
+        retry,
+        Err(RedeemNativeAuthorizationCodeError::InvalidGrant(_))
+    ));
+    Ok(())
+}
+
+#[test]
+fn should_reject_short_pkce_verifier() -> Result<(), RejectResponse> {
+    let env = env();
+    let request = native_request();
+    let canister_id = install_native_oidc_ii(
+        &env,
+        vec![native_client_config(
+            &request.client_id,
+            vec![request.redirect_uri.clone()],
+        )],
+    );
+    let anchor_number = flows::register_anchor(&env, canister_id);
+    let prepared = api::prepare_native_authorization(&env, canister_id, &request)?
+        .expect("prepare should succeed");
+    api::complete_native_authorization(
+        &env,
+        canister_id,
+        principal_1(),
+        anchor_number,
+        &prepared.request_id,
+        None,
+    )?
+    .expect("completion should succeed");
+
+    let result = api::redeem_native_authorization_code(
+        &env,
+        canister_id,
+        &RedeemNativeAuthorizationCodeRequest {
+            code_verifier: "short-verifier".to_string(),
+            ..redeem_request(
+                &prepared.request_id,
+                &request.redirect_uri,
+                &request.client_id,
+            )
+        },
+    )?;
+    assert!(matches!(
+        result,
+        Err(RedeemNativeAuthorizationCodeError::InvalidRequest(_))
+    ));
+    Ok(())
+}
+
+#[test]
+fn should_reject_too_long_pkce_verifier() -> Result<(), RejectResponse> {
+    let env = env();
+    let request = native_request();
+    let canister_id = install_native_oidc_ii(
+        &env,
+        vec![native_client_config(
+            &request.client_id,
+            vec![request.redirect_uri.clone()],
+        )],
+    );
+    let anchor_number = flows::register_anchor(&env, canister_id);
+    let prepared = api::prepare_native_authorization(&env, canister_id, &request)?
+        .expect("prepare should succeed");
+    api::complete_native_authorization(
+        &env,
+        canister_id,
+        principal_1(),
+        anchor_number,
+        &prepared.request_id,
+        None,
+    )?
+    .expect("completion should succeed");
+
+    let result = api::redeem_native_authorization_code(
+        &env,
+        canister_id,
+        &RedeemNativeAuthorizationCodeRequest {
+            code_verifier: "a".repeat(129),
+            ..redeem_request(
+                &prepared.request_id,
+                &request.redirect_uri,
+                &request.client_id,
+            )
+        },
+    )?;
+    assert!(matches!(
+        result,
+        Err(RedeemNativeAuthorizationCodeError::InvalidRequest(_))
+    ));
     Ok(())
 }
 

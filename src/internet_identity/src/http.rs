@@ -14,7 +14,17 @@ mod metrics;
 
 fn http_options_request() -> HttpResponse {
     // TODO: Restrict origin to just the II-specific origins.
-    let headers = vec![("Access-Control-Allow-Origin".to_string(), "*".to_string())];
+    let headers = vec![
+        ("Access-Control-Allow-Origin".to_string(), "*".to_string()),
+        (
+            "Access-Control-Allow-Methods".to_string(),
+            "GET, POST, OPTIONS".to_string(),
+        ),
+        (
+            "Access-Control-Allow-Headers".to_string(),
+            "authorization, content-type".to_string(),
+        ),
+    ];
 
     HttpResponse {
         // Indicates success without any additional content to be sent in the response content.
@@ -27,12 +37,13 @@ fn http_options_request() -> HttpResponse {
 
 fn http_get_request(
     url: String,
-    _headers: Vec<HeaderField>,
+    headers: Vec<HeaderField>,
     certificate_version: Option<u16>,
 ) -> HttpResponse {
     let parts: Vec<&str> = url.split('?').collect();
+    let path = parts[0];
 
-    match parts[0] {
+    match path {
         "/.well-known/openid-configuration" => {
             match native_authorization::openid_configuration_json() {
                 Ok(body) => json_response(body),
@@ -44,21 +55,15 @@ fn http_get_request(
             Err(err) => server_error(err),
         },
         "/oauth2/delegation" => {
-            let Some(query) = parts.get(1) else {
-                return bad_request("missing access_token");
-            };
-            let Ok(fields) = parse_form_urlencoded(query.as_bytes()) else {
-                return bad_request("invalid delegation exchange request");
-            };
-            let Ok(access_token) = required_form_field(&fields, "access_token") else {
-                return bad_request("missing access_token");
+            let Ok(access_token) = delegation_access_token(&headers, parts.get(1).copied()) else {
+                return sensitive_bad_request("missing access_token");
             };
             match native_authorization::exchange_delegation(
                 internet_identity_interface::internet_identity::types::ExchangeNativeAccessTokenForDelegationRequest {
                     access_token,
                 },
             ) {
-                Ok(response) => json_response(
+                Ok(response) => sensitive_json_response(
                     serde_json::to_vec(&json!({
                         "user_key": response.user_key,
                         "signed_delegation": {
@@ -117,10 +122,10 @@ fn http_get_request(
     }
 }
 
-fn method_not_allowed(unsupported_method: &str) -> HttpResponse {
+fn method_not_allowed(unsupported_method: &str, allow: &str) -> HttpResponse {
     HttpResponse {
         status_code: 405,
-        headers: vec![("Allow".into(), "GET, OPTIONS".into())],
+        headers: vec![("Allow".into(), allow.into())],
         body: ByteBuf::from(format!("Method {unsupported_method} not allowed.")),
         upgrade: None,
     }
@@ -137,6 +142,9 @@ pub fn http_request(req: HttpRequest) -> HttpResponse {
 
     match method.as_str() {
         "OPTIONS" => http_options_request(),
+        "GET" if url.split('?').next().unwrap_or_default() == "/oauth2/token" => {
+            method_not_allowed("GET", allowed_methods_for_path(&url))
+        }
         "GET" => http_get_request(url, headers, certificate_version),
         "POST" if is_upgradable_post(&url) => HttpResponse {
             status_code: 204,
@@ -144,7 +152,9 @@ pub fn http_request(req: HttpRequest) -> HttpResponse {
             body: ByteBuf::from(vec![]),
             upgrade: Some(true),
         },
-        unsupported_method => method_not_allowed(unsupported_method),
+        unsupported_method => {
+            method_not_allowed(unsupported_method, allowed_methods_for_path(&url))
+        }
     }
 }
 
@@ -157,12 +167,12 @@ pub async fn http_request_update(req: HttpRequest) -> HttpResponse {
         certificate_version: _,
     } = req;
     if method != "POST" {
-        return method_not_allowed(&method);
+        return method_not_allowed(&method, allowed_methods_for_path(&url));
     }
     match url.split('?').next().unwrap_or_default() {
         "/oauth2/token" => {
             let Ok(request) = parse_redeem_request(&headers, &body) else {
-                return bad_request("invalid token request");
+                return sensitive_bad_request("invalid token request");
             };
             match native_authorization::redeem_code(RedeemNativeAuthorizationCodeRequest {
                 grant_type: request.grant_type,
@@ -173,7 +183,7 @@ pub async fn http_request_update(req: HttpRequest) -> HttpResponse {
             })
             .await
             {
-                Ok(response) => json_response(
+                Ok(response) => sensitive_json_response(
                     serde_json::to_vec(&json!({
                         "access_token": response.access_token,
                         "token_type": response.token_type,
@@ -185,7 +195,7 @@ pub async fn http_request_update(req: HttpRequest) -> HttpResponse {
                 Err(err) => oauth_error_response(err),
             }
         }
-        _ => method_not_allowed("POST"),
+        _ => method_not_allowed("POST", allowed_methods_for_path(&url)),
     }
 }
 
@@ -204,6 +214,15 @@ fn json_response(body: Vec<u8>) -> HttpResponse {
     }
 }
 
+fn sensitive_json_response(body: Vec<u8>) -> HttpResponse {
+    HttpResponse {
+        status_code: 200,
+        headers: sensitive_json_headers(body.len()),
+        body: ByteBuf::from(body),
+        upgrade: None,
+    }
+}
+
 fn server_error(message: String) -> HttpResponse {
     HttpResponse {
         status_code: 500,
@@ -213,13 +232,19 @@ fn server_error(message: String) -> HttpResponse {
     }
 }
 
-fn bad_request(message: &str) -> HttpResponse {
+fn sensitive_bad_request(message: &str) -> HttpResponse {
     HttpResponse {
         status_code: 400,
-        headers: plain_text_headers(message.len()),
+        headers: sensitive_plain_text_headers(message.len()),
         body: ByteBuf::from(message.as_bytes().to_vec()),
         upgrade: None,
     }
+}
+
+fn sensitive_json_headers(content_length: usize) -> Vec<HeaderField> {
+    let mut headers = json_headers(content_length);
+    headers.extend(cache_control_headers());
+    headers
 }
 
 fn json_headers(content_length: usize) -> Vec<HeaderField> {
@@ -229,6 +254,12 @@ fn json_headers(content_length: usize) -> Vec<HeaderField> {
         ("Content-Length".to_string(), content_length.to_string()),
     ];
     headers.append(&mut security_headers(None));
+    headers
+}
+
+fn sensitive_plain_text_headers(content_length: usize) -> Vec<HeaderField> {
+    let mut headers = plain_text_headers(content_length);
+    headers.extend(cache_control_headers());
     headers
 }
 
@@ -245,8 +276,48 @@ fn plain_text_headers(content_length: usize) -> Vec<HeaderField> {
     headers
 }
 
+fn cache_control_headers() -> Vec<HeaderField> {
+    vec![
+        (
+            "Cache-Control".to_string(),
+            "no-store, no-cache, max-age=0".to_string(),
+        ),
+        ("Pragma".to_string(), "no-cache".to_string()),
+    ]
+}
+
 fn is_upgradable_post(url: &str) -> bool {
     matches!(url.split('?').next().unwrap_or_default(), "/oauth2/token")
+}
+
+fn allowed_methods_for_path(url: &str) -> &'static str {
+    match url.split('?').next().unwrap_or_default() {
+        "/oauth2/token" => "POST, OPTIONS",
+        _ => "GET, OPTIONS",
+    }
+}
+
+fn delegation_access_token(headers: &[HeaderField], query: Option<&str>) -> Result<String, ()> {
+    if let Some(access_token) = bearer_access_token(headers) {
+        return Ok(access_token);
+    }
+    let Some(query) = query else {
+        return Err(());
+    };
+    let fields = parse_form_urlencoded(query.as_bytes()).map_err(|_| ())?;
+    required_form_field(&fields, "access_token").map_err(|_| ())
+}
+
+fn bearer_access_token(headers: &[HeaderField]) -> Option<String> {
+    headers.iter().find_map(|(name, value)| {
+        if !name.eq_ignore_ascii_case("authorization") {
+            return None;
+        }
+        value
+            .strip_prefix("Bearer ")
+            .or_else(|| value.strip_prefix("bearer "))
+            .map(str::to_string)
+    })
 }
 
 fn oauth_error_response(
@@ -273,7 +344,7 @@ fn oauth_error_response(
     .expect("oauth error should serialize");
     HttpResponse {
         status_code,
-        headers: json_headers(body.len()),
+        headers: sensitive_json_headers(body.len()),
         body: ByteBuf::from(body),
         upgrade: None,
     }
@@ -299,7 +370,7 @@ fn delegation_exchange_error_response(
     let body = serde_json::to_vec(&body).expect("exchange error should serialize");
     HttpResponse {
         status_code,
-        headers: json_headers(body.len()),
+        headers: sensitive_json_headers(body.len()),
         body: ByteBuf::from(body),
         upgrade: None,
     }
