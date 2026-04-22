@@ -107,6 +107,23 @@ describe("nativeOidc", () => {
     );
   });
 
+  it("rejects code exchange without issuer or token endpoint as invalid configuration", async () => {
+    await expect(
+      exchangeNativeOidcCode({
+        fetchFn: vi.fn(),
+        clientId: "com.example.app",
+        code: "native-code",
+        codeVerifier: "native-verifier",
+        redirectUri: "com.example.app:/oauth2redirect/ii",
+      }),
+    ).rejects.toMatchObject({
+      name: "NativeOidcError",
+      phase: "discovery",
+      code: "invalid_configuration",
+      message: "issuer is required when tokenEndpoint is missing",
+    });
+  });
+
   it("fetches certified delegation and converts it to a DelegationChain", async () => {
     const fetchMock = vi
       .fn()
@@ -170,6 +187,20 @@ describe("nativeOidc", () => {
     expect(
       delegationChain.delegations[0].delegation.targets?.[0].toText(),
     ).toBe("aaaaa-aa");
+  });
+
+  it("rejects delegation fetch without issuer or delegation endpoint as invalid configuration", async () => {
+    await expect(
+      fetchIcDelegation({
+        fetchFn: vi.fn(),
+        accessToken: "native-access-token",
+      }),
+    ).rejects.toMatchObject({
+      name: "NativeOidcError",
+      phase: "discovery",
+      code: "invalid_configuration",
+      message: "issuer is required when delegationEndpoint is missing",
+    });
   });
 
   it("completes the token and delegation flow in one helper call", async () => {

@@ -62,7 +62,13 @@ struct CanonicalOrigin {
 enum RedirectUriKind {
     ClaimedHttps(CanonicalOrigin),
     PrivateScheme,
-    Loopback,
+    Loopback(LoopbackRedirectUri),
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct LoopbackRedirectUri {
+    host: String,
+    path: String,
 }
 
 #[derive(Clone)]
@@ -120,7 +126,8 @@ pub async fn prepare(
     let registered_client = validate_prepare_request(&request)?;
     let origin = canonicalize_native_origin_string(&request.origin)
         .map_err(PrepareNativeAuthorizationError::InvalidOrigin)?;
-    let ii_origin = request.ii_origin.trim_end_matches('/').to_string();
+    let ii_origin = canonicalize_ii_origin(&request.ii_origin)
+        .map_err(PrepareNativeAuthorizationError::InvalidOrigin)?;
     let issuer = configured_issuer_origin();
 
     let request_id = random_token(REQUEST_ID_NUM_BYTES).await.map_err(|err| {
@@ -265,7 +272,7 @@ pub async fn redeem_code(
     if !registered_client
         .redirect_uris
         .iter()
-        .any(|redirect_uri| redirect_uri == &request.redirect_uri)
+        .any(|redirect_uri| redirect_uri_matches_registration(&request.redirect_uri, redirect_uri))
     {
         return Err(RedeemNativeAuthorizationCodeError::InvalidGrant(
             "redirect_uri is not registered for client_id".to_string(),
@@ -445,7 +452,7 @@ fn validate_prepare_request(
     if !registered_client
         .redirect_uris
         .iter()
-        .any(|redirect_uri| redirect_uri == &request.redirect_uri)
+        .any(|redirect_uri| redirect_uri_matches_registration(&request.redirect_uri, redirect_uri))
     {
         return Err(PrepareNativeAuthorizationError::InvalidRedirectUri(
             "redirect_uri is not registered for client_id".to_string(),
@@ -604,6 +611,19 @@ fn validate_redirect_uri(redirect_uri: &str) -> Result<(), String> {
     parse_redirect_uri(redirect_uri).map(|_| ())
 }
 
+fn redirect_uri_matches_registration(requested: &str, registered: &str) -> bool {
+    match (
+        parse_redirect_uri(requested),
+        parse_redirect_uri(registered),
+    ) {
+        (Ok(RedirectUriKind::Loopback(requested)), Ok(RedirectUriKind::Loopback(registered))) => {
+            requested == registered
+        }
+        (Ok(_), Ok(_)) => requested == registered,
+        _ => false,
+    }
+}
+
 fn parse_redirect_uri(redirect_uri: &str) -> Result<RedirectUriKind, String> {
     if redirect_uri.is_empty() {
         return Err("redirect_uri must not be empty".to_string());
@@ -627,8 +647,9 @@ fn parse_redirect_uri(redirect_uri: &str) -> Result<RedirectUriKind, String> {
         return Ok(RedirectUriKind::ClaimedHttps(origin));
     }
     if redirect_uri.starts_with("http://") {
-        validate_loopback_redirect_uri(redirect_uri)?;
-        return Ok(RedirectUriKind::Loopback);
+        return Ok(RedirectUriKind::Loopback(parse_loopback_redirect_uri(
+            redirect_uri,
+        )?));
     }
     validate_private_scheme_redirect_uri(redirect_uri)?;
     Ok(RedirectUriKind::PrivateScheme)
@@ -650,11 +671,13 @@ fn validate_private_scheme_redirect_uri(redirect_uri: &str) -> Result<(), String
     Ok(())
 }
 
-fn validate_loopback_redirect_uri(redirect_uri: &str) -> Result<(), String> {
+fn parse_loopback_redirect_uri(redirect_uri: &str) -> Result<LoopbackRedirectUri, String> {
     let remainder = redirect_uri
         .strip_prefix("http://")
         .ok_or_else(|| "loopback redirect_uri must start with http://".to_string())?;
-    let authority = remainder.split('/').next().unwrap_or_default();
+    let (authority, path) = remainder
+        .split_once('/')
+        .ok_or_else(|| "loopback redirect_uri must include a path".to_string())?;
     if authority.is_empty() {
         return Err("loopback redirect_uri must include a host".to_string());
     }
@@ -666,10 +689,10 @@ fn validate_loopback_redirect_uri(redirect_uri: &str) -> Result<(), String> {
         );
     }
     validate_port(port, "loopback redirect_uri")?;
-    if !remainder.contains('/') {
-        return Err("loopback redirect_uri must include a path".to_string());
-    }
-    Ok(())
+    Ok(LoopbackRedirectUri {
+        host: host.to_ascii_lowercase(),
+        path: format!("/{path}"),
+    })
 }
 
 fn is_reverse_domain_scheme(scheme: &str) -> bool {
@@ -685,36 +708,23 @@ fn is_reverse_domain_scheme(scheme: &str) -> bool {
 }
 
 fn validate_ii_origin(ii_origin: &str) -> Result<(), String> {
-    validate_https_url_like(ii_origin, "ii origin")
+    canonicalize_ii_origin(ii_origin).map(|_| ())
 }
 
-fn validate_https_url_like(url: &str, field_name: &str) -> Result<(), String> {
-    if url.is_empty() {
-        return Err(format!("{field_name} must not be empty"));
+fn canonicalize_ii_origin(ii_origin: &str) -> Result<String, String> {
+    if ii_origin.is_empty() {
+        return Err("ii origin must not be empty".to_string());
     }
-    if url.len() > HTTPS_URL_MAX_BYTES {
+    if ii_origin.len() > HTTPS_URL_MAX_BYTES {
         return Err(format!(
-            "{field_name} must not exceed {HTTPS_URL_MAX_BYTES} bytes"
+            "ii origin must not exceed {HTTPS_URL_MAX_BYTES} bytes"
         ));
     }
-    if !url.starts_with("https://") {
-        return Err(format!("{field_name} must start with `https://`"));
+    if ii_origin.bytes().any(|byte| byte <= b' ') {
+        return Err("ii origin must not contain control characters".to_string());
     }
-    if url.contains('?') || url.contains('#') {
-        return Err(format!("{field_name} must not contain query or fragment"));
-    }
-    if url.bytes().any(|byte| byte <= b' ') {
-        return Err(format!("{field_name} must not contain control characters"));
-    }
-    let authority = extract_https_authority(url)?;
-    if authority.contains('@') {
-        return Err(format!("{field_name} must not include userinfo"));
-    }
-    let (host, port) = split_host_and_port(authority)
-        .ok_or_else(|| format!("{field_name} must include a valid host"))?;
-    validate_host(host, field_name)?;
-    validate_port(port, field_name)?;
-    Ok(())
+    let trimmed = ii_origin.trim_end_matches('/');
+    canonicalize_native_origin_string(trimmed).map_err(|err| format!("ii origin {err}"))
 }
 
 fn canonicalize_native_origin_string(origin: &str) -> Result<String, String> {
@@ -1076,5 +1086,26 @@ mod tests {
         assert!(validate_issuer_origin("https://identity.ic0.app:443").is_ok());
         assert!(validate_issuer_origin("https://identity.ic0.app/").is_err());
         assert!(validate_issuer_origin("https://identity.ic0.app/path").is_err());
+    }
+
+    #[test]
+    fn should_canonicalize_ii_origin_with_optional_trailing_slash() {
+        assert_eq!(
+            canonicalize_ii_origin("https://identity.ic0.app/").unwrap(),
+            "https://identity.ic0.app"
+        );
+        assert!(canonicalize_ii_origin("https://identity.ic0.app/path").is_err());
+    }
+
+    #[test]
+    fn should_match_loopback_registration_without_port() {
+        assert!(redirect_uri_matches_registration(
+            "http://127.0.0.1:49152/oauth2redirect/ii",
+            "http://127.0.0.1:3000/oauth2redirect/ii"
+        ));
+        assert!(!redirect_uri_matches_registration(
+            "http://127.0.0.1:49152/oauth2redirect/ii",
+            "http://127.0.0.1:3000/other"
+        ));
     }
 }

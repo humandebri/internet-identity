@@ -186,9 +186,12 @@ const resolveNativeOidcEndpoints = async (
     };
   }
   if (input.issuer === undefined) {
-    throw new Error(
-      "issuer is required when tokenEndpoint or delegationEndpoint is missing",
-    );
+    throw new NativeOidcError({
+      phase: "discovery",
+      code: "invalid_configuration",
+      message:
+        "issuer is required when tokenEndpoint or delegationEndpoint is missing",
+    });
   }
   const discovery = await fetchNativeOidcDiscovery({
     issuer: input.issuer,
@@ -231,7 +234,11 @@ const resolveTokenEndpoint = async (
     return input.tokenEndpoint;
   }
   if (input.issuer === undefined) {
-    throw new Error("issuer is required when tokenEndpoint is missing");
+    throw new NativeOidcError({
+      phase: "discovery",
+      code: "invalid_configuration",
+      message: "issuer is required when tokenEndpoint is missing",
+    });
   }
   return (
     await resolveNativeOidcEndpoints({
@@ -248,7 +255,11 @@ const resolveDelegationEndpoint = async (
     return input.delegationEndpoint;
   }
   if (input.issuer === undefined) {
-    throw new Error("issuer is required when delegationEndpoint is missing");
+    throw new NativeOidcError({
+      phase: "discovery",
+      code: "invalid_configuration",
+      message: "issuer is required when delegationEndpoint is missing",
+    });
   }
   return (
     await resolveNativeOidcEndpoints({

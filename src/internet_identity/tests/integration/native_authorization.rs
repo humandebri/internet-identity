@@ -290,11 +290,78 @@ fn should_support_loopback_redirect_uri() -> Result<(), RejectResponse> {
 }
 
 #[test]
+fn should_accept_loopback_redirect_uri_with_ephemeral_port() -> Result<(), RejectResponse> {
+    let env = env();
+    let mut request = native_request();
+    request.redirect_uri = "http://127.0.0.1:49152/oauth2redirect/ii".to_string();
+    let canister_id = install_native_oidc_ii(
+        &env,
+        vec![native_client_config(
+            &request.client_id,
+            vec!["http://127.0.0.1:3000/oauth2redirect/ii".to_string()],
+        )],
+    );
+    let anchor_number = flows::register_anchor(&env, canister_id);
+
+    let prepared = api::prepare_native_authorization(&env, canister_id, &request)?
+        .expect("prepare native authorization should succeed");
+    let completed = api::complete_native_authorization(
+        &env,
+        canister_id,
+        principal_1(),
+        anchor_number,
+        &prepared.request_id,
+        None,
+    )?
+    .expect("completion should succeed");
+    assert_eq!(
+        completed.redirect_url,
+        format!(
+            "{}?code={}&state={}",
+            request.redirect_uri, prepared.request_id, request.state
+        )
+    );
+
+    api::redeem_native_authorization_code(
+        &env,
+        canister_id,
+        &redeem_request(
+            &prepared.request_id,
+            &request.redirect_uri,
+            &request.client_id,
+        ),
+    )?
+    .expect("redeem should succeed");
+    Ok(())
+}
+
+#[test]
 fn should_reject_loopback_redirect_uri_with_unregistered_origin() -> Result<(), RejectResponse> {
     let env = env();
     let mut request = native_request();
     request.redirect_uri = "http://127.0.0.1:49152/oauth2redirect/ii".to_string();
     request.origin = "https://evil.example.com".to_string();
+    let canister_id = install_native_oidc_ii(
+        &env,
+        vec![native_client_config(
+            &request.client_id,
+            vec![request.redirect_uri.clone()],
+        )],
+    );
+
+    let result = api::prepare_native_authorization(&env, canister_id, &request)?;
+    assert!(matches!(
+        result,
+        Err(PrepareNativeAuthorizationError::InvalidOrigin(_))
+    ));
+    Ok(())
+}
+
+#[test]
+fn should_reject_ii_origin_with_path() -> Result<(), RejectResponse> {
+    let env = env();
+    let mut request = native_request();
+    request.ii_origin = "https://identity.test/foo".to_string();
     let canister_id = install_native_oidc_ii(
         &env,
         vec![native_client_config(
