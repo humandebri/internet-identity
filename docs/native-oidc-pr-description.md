@@ -2,9 +2,7 @@
 
 ## Summary
 
-This PR updates Internet Identity native browser authorization from the original
-`prepare -> browser -> callback(native_request_id) -> fetch_native_delegation`
-shape to an OAuth-style split flow:
+This PR updates Internet Identity native browser authorization to an OAuth-style split flow:
 
 `prepare -> browser authorize -> redirect_uri?code=...&state=... -> POST /oauth2/token -> GET /oauth2/delegation`
 
@@ -19,12 +17,13 @@ The PR scope is:
 
 ### Backend flow
 
-- `prepare_native_authorization` now prepares an OAuth-style authorization code flow instead of
-  returning a `native_request_id` callback contract.
+- `prepare_native_authorization` now returns `authorize_url` for the browser step.
 - `complete_native_authorization` now completes browser auth by redirecting to
-  `redirect_uri?code=<request_id>&state=<state>`.
+  `redirect_uri?code=<authorization_code>&state=<state>`.
 - `redeem_native_authorization_code` exchanges that code for an II-native `access_token`,
   `token_type`, `expires_in`, and `id_token`.
+- Successful code redemption consumes the authorization request and authorization code records, so
+  completed logins do not occupy request or code capacity until TTL expiry.
 - `exchange_native_access_token_for_delegation` turns the short-lived II exchange token into the
   certified IC delegation.
 
@@ -75,8 +74,11 @@ The PR scope is:
 ## Known Limitations / Follow-Ups
 
 - `prepare_native_authorization` is anonymously callable and currently relies only on global caps
-  for pending requests and exchange tokens. Per-client, per-origin, and caller-scoped quotas are
-  not part of this PR.
+  for pending requests and exchange tokens. Successful token redemption now releases request and
+  authorization-code capacity, but per-client, per-origin, and caller-scoped quotas are not part of
+  this PR.
+- Access-token exchange stays on a query path for low-latency delegation retrieval. Native access
+  tokens are short-lived bearer exchange tokens and can be reused until expiry.
 - Full removal of `GET /oauth2/delegation?access_token=...` is intentionally deferred because it
   is a compatibility decision, not a transport hardening bug.
 - Pairwise `sub` stability depends on the configured issuer origin. Changing the issuer can rotate

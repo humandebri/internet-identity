@@ -167,7 +167,6 @@ pub struct PrepareNativeAuthorizationRequest {
 
 #[derive(Clone, Debug, CandidType, Deserialize)]
 pub struct PrepareNativeAuthorizationResponse {
-    pub request_id: String,
     pub authorize_url: String,
     pub expires_at: Timestamp,
 }

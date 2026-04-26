@@ -611,7 +611,6 @@ export const idlFactory = ({ IDL }) => {
     'ii_origin' : IDL.Text,
   });
   const PrepareNativeAuthorizationResponse = IDL.Record({
-    'request_id' : IDL.Text,
     'authorize_url' : IDL.Text,
     'expires_at' : Timestamp,
   });

@@ -4,8 +4,8 @@ use crate::account_management;
 use crate::authz_utils::{check_authorization, ii_domain, record_activity, IdentityUpdateError};
 use crate::state;
 use crate::state::native_authorization::{
-    AuthorizedNativeAuthorization, NativeAccessTokenRecord, NativeAuthorizationRecord,
-    NativeAuthorizationStatus,
+    AuthorizationCodeRecord, AuthorizedNativeAuthorization, NativeAccessTokenRecord,
+    NativeAuthorizationRecord, NativeAuthorizationStatus,
 };
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
@@ -161,7 +161,6 @@ pub async fn prepare(
 
     Ok(PrepareNativeAuthorizationResponse {
         authorize_url: format!("{ii_origin}/authorize?native_request_id={request_id}"),
-        request_id,
         expires_at,
     })
 }
@@ -227,23 +226,34 @@ pub async fn complete(
     )?;
 
     let now = time();
-    let redirect_url = format_redirect_url(&record.redirect_uri, request_id, &record.state);
+    let authorization_code = random_token(REQUEST_ID_NUM_BYTES).await.map_err(|err| {
+        CompleteNativeAuthorizationError::InternalCanisterError(format!(
+            "failed to generate authorization code: {err}"
+        ))
+    })?;
     let authorized = AuthorizedNativeAuthorization {
         anchor_number,
         account_number,
         user_key: prepared.user_key,
         expiration: prepared.expiration,
-        code_expires_at: now.saturating_add(CODE_TTL_NS),
-        redeemed_at: None,
     };
 
     state::native_authorizations_mut(|native_authorizations| {
-        native_authorizations.complete_claimed(
+        native_authorizations.complete_claimed_with_authorization_code(
             request_id,
             authorized,
             now.saturating_add(COMPLETED_REQUEST_GRACE_PERIOD_NS),
+            authorization_code.clone(),
+            AuthorizationCodeRecord {
+                request_id: request_id.to_string(),
+                expires_at: now.saturating_add(CODE_TTL_NS),
+                redeemed_at: None,
+            },
+            now,
         )
     })?;
+    let redirect_url =
+        format_redirect_url(&record.redirect_uri, &authorization_code, &record.state);
 
     Ok(CompleteNativeAuthorizationResponse { redirect_url })
 }
@@ -255,7 +265,7 @@ pub async fn redeem_code(
     let registered_client = registered_client(&request.client_id)
         .map_err(RedeemNativeAuthorizationCodeError::InvalidRequest)?;
     let now = time();
-    let record = state::native_authorizations_mut(|native_authorizations| {
+    let (code_record, record) = state::native_authorizations_mut(|native_authorizations| {
         native_authorizations.authorized_code(&request.code, now)
     })?;
     if record.redirect_uri != request.redirect_uri {
@@ -283,11 +293,10 @@ pub async fn redeem_code(
         &request.code_verifier,
     ) {
         state::native_authorizations_mut(|native_authorizations| {
-            native_authorizations.invalidate_code(&request.code, now);
+            native_authorizations.invalidate_authorization_code(&request.code, now);
         });
         return Err(err);
     }
-
     let access_token = random_token(TOKEN_NUM_BYTES).await.map_err(|err| {
         RedeemNativeAuthorizationCodeError::InternalCanisterError(format!(
             "failed to generate access token: {err}"
@@ -318,8 +327,9 @@ pub async fn redeem_code(
     .await?;
 
     state::native_authorizations_mut(|native_authorizations| {
-        native_authorizations.issue_access_token(
+        native_authorizations.issue_access_token_and_consume_authorization(
             &request.code,
+            &code_record.request_id,
             access_token.clone(),
             token_record,
             now,

@@ -1044,15 +1044,41 @@ fn ii_canister_serves_native_oidc_token_and_delegation_http_endpoints() -> Resul
         },
     )?
     .expect("prepare should succeed");
-    api::complete_native_authorization(
+    let request_id = {
+        let authorize_url = prepared.authorize_url.clone();
+        let (_, query) = authorize_url
+            .split_once('?')
+            .expect("authorize_url should contain query");
+        query
+            .split('&')
+            .find_map(|pair| {
+                let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+                (key == "native_request_id").then(|| value.to_string())
+            })
+            .expect("authorize_url should include native_request_id")
+    };
+    let completed = api::complete_native_authorization(
         &env,
         canister_id,
         principal_1(),
         anchor_number,
-        &prepared.request_id,
+        &request_id,
         None,
     )?
     .expect("completion should succeed");
+    let authorization_code = {
+        let (_, query) = completed
+            .redirect_url
+            .split_once('?')
+            .expect("redirect_url should contain query");
+        query
+            .split('&')
+            .find_map(|pair| {
+                let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+                (key == "code").then(|| value.to_string())
+            })
+            .expect("redirect_url should include code")
+    };
 
     let token_request = HttpRequest {
         method: "POST".to_string(),
@@ -1064,7 +1090,7 @@ fn ii_canister_serves_native_oidc_token_and_delegation_http_endpoints() -> Resul
         body: ByteBuf::from(
             format!(
                 "grant_type=authorization_code&code={}&redirect_uri={}&code_verifier={}&client_id={}",
-                prepared.request_id, redirect_uri, verifier, client_id
+                authorization_code, redirect_uri, verifier, client_id
             )
             .into_bytes(),
         ),
@@ -1191,7 +1217,7 @@ fn ii_canister_serves_native_oidc_token_and_delegation_http_endpoints() -> Resul
             body: ByteBuf::from(
                 format!(
                     "grant_type=authorization_code&code={}&redirect_uri={}&client_id={}",
-                    prepared.request_id, redirect_uri, client_id
+                    request_id, redirect_uri, client_id
                 )
                 .into_bytes(),
             ),
