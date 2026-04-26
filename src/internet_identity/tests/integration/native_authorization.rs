@@ -409,21 +409,23 @@ fn should_reject_loopback_redirect_uri_with_unregistered_origin() -> Result<(), 
 #[test]
 fn should_reject_ii_origin_with_path() -> Result<(), RejectResponse> {
     let env = env();
-    let mut request = native_request();
-    request.ii_origin = "https://identity.test/foo".to_string();
     let canister_id = install_native_oidc_ii(
         &env,
         vec![native_client_config(
-            &request.client_id,
-            vec![request.redirect_uri.clone()],
+            &native_request().client_id,
+            vec![native_request().redirect_uri],
         )],
     );
 
-    let result = api::prepare_native_authorization(&env, canister_id, &request)?;
-    assert!(matches!(
-        result,
-        Err(PrepareNativeAuthorizationError::InvalidOrigin(_))
-    ));
+    for ii_origin in ["https://identity.test/foo", "https://identity.test//"] {
+        let mut request = native_request();
+        request.ii_origin = ii_origin.to_string();
+        let result = api::prepare_native_authorization(&env, canister_id, &request)?;
+        assert!(matches!(
+            result,
+            Err(PrepareNativeAuthorizationError::InvalidOrigin(_))
+        ));
+    }
     Ok(())
 }
 

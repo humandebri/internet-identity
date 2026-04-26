@@ -733,7 +733,10 @@ fn canonicalize_ii_origin(ii_origin: &str) -> Result<String, String> {
     if ii_origin.bytes().any(|byte| byte <= b' ') {
         return Err("ii origin must not contain control characters".to_string());
     }
-    let trimmed = ii_origin.trim_end_matches('/');
+    let trimmed = ii_origin.strip_suffix('/').unwrap_or(ii_origin);
+    if trimmed.ends_with('/') {
+        return Err("ii origin must not contain a path".to_string());
+    }
     canonicalize_native_origin_string(trimmed).map_err(|err| format!("ii origin {err}"))
 }
 
@@ -1104,6 +1107,7 @@ mod tests {
             canonicalize_ii_origin("https://identity.ic0.app/").unwrap(),
             "https://identity.ic0.app"
         );
+        assert!(canonicalize_ii_origin("https://identity.ic0.app//").is_err());
         assert!(canonicalize_ii_origin("https://identity.ic0.app/path").is_err());
     }
 
