@@ -169,7 +169,8 @@ Rejected redirect URIs include:
 
 For claimed HTTPS redirects, `redirect_uri` must match the prepared `origin`. Private-use and
 loopback redirects are validated by URI class, registered `redirect_uri` membership, and registered
-`allowed_origins` membership.
+`allowed_origins` membership. Loopback registration ignores the port and matches on host plus path,
+so native apps can use an ephemeral port per authorization request.
 
 ## Request Binding
 
