@@ -69,6 +69,8 @@ The PR scope is:
   New clients should not use it.
 - `access_token` is an II-specific exchange token. It is not a general bearer token for arbitrary
   resources.
+- Discovery clients reject provider metadata whose `issuer` does not exactly match the requested
+  issuer.
 - `id_token.sub` is now a pairwise subject per `client_id`, not the anchor number.
 
 ## Known Limitations / Follow-Ups

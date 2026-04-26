@@ -100,6 +100,7 @@ const { delegationChain } = await fetchIcDelegation({
 - `issuer` only
   - Helper reads discovery.
   - `token_endpoint` and `ic_delegation_endpoint` come from the discovery document.
+  - The returned `issuer` must exactly match the requested issuer.
 - `tokenEndpoint` only
   - `exchangeNativeOidcCode(...)` can use it directly.
 - `delegationEndpoint` only
@@ -107,10 +108,13 @@ const { delegationChain } = await fetchIcDelegation({
 - `completeNativeOidcLogin(...)`
   - Must receive `issuer`, or both explicit endpoints.
   - Partial endpoint override is rejected as invalid configuration.
+  - Throws `NativeOidcError` with `code = "invalid_configuration"` on bad input.
 
 ## Error Contract
 
 - Helper failures throw `NativeOidcError`.
+- This includes invalid local configuration for `exchangeNativeOidcCode(...)`,
+  `fetchIcDelegation(...)`, and `completeNativeOidcLogin(...)`.
 - Stable fields:
   - `phase`
     - `discovery`
@@ -184,6 +188,10 @@ so native apps can use an ephemeral port per authorization request.
 
 - `client_id`
 - `redirect_uri`
+- `ii_origin`
+  - Must be an HTTPS origin.
+  - Optional trailing slash is accepted.
+  - Paths other than `/`, query, and fragment are rejected.
 - `state`
 - `scope` including `openid`
 - `nonce`

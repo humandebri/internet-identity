@@ -126,7 +126,8 @@ pub async fn prepare(
     let registered_client = validate_prepare_request(&request)?;
     let origin = canonicalize_native_origin_string(&request.origin)
         .map_err(PrepareNativeAuthorizationError::InvalidOrigin)?;
-    let ii_origin = request.ii_origin.trim_end_matches('/').to_string();
+    let ii_origin = canonicalize_ii_origin(&request.ii_origin)
+        .map_err(PrepareNativeAuthorizationError::InvalidOrigin)?;
     let issuer = configured_issuer_origin();
 
     let request_id = random_token(REQUEST_ID_NUM_BYTES).await.map_err(|err| {
@@ -717,36 +718,23 @@ fn is_reverse_domain_scheme(scheme: &str) -> bool {
 }
 
 fn validate_ii_origin(ii_origin: &str) -> Result<(), String> {
-    validate_https_url_like(ii_origin, "ii origin")
+    canonicalize_ii_origin(ii_origin).map(|_| ())
 }
 
-fn validate_https_url_like(url: &str, field_name: &str) -> Result<(), String> {
-    if url.is_empty() {
-        return Err(format!("{field_name} must not be empty"));
+fn canonicalize_ii_origin(ii_origin: &str) -> Result<String, String> {
+    if ii_origin.is_empty() {
+        return Err("ii origin must not be empty".to_string());
     }
-    if url.len() > HTTPS_URL_MAX_BYTES {
+    if ii_origin.len() > HTTPS_URL_MAX_BYTES {
         return Err(format!(
-            "{field_name} must not exceed {HTTPS_URL_MAX_BYTES} bytes"
+            "ii origin must not exceed {HTTPS_URL_MAX_BYTES} bytes"
         ));
     }
-    if !url.starts_with("https://") {
-        return Err(format!("{field_name} must start with `https://`"));
+    if ii_origin.bytes().any(|byte| byte <= b' ') {
+        return Err("ii origin must not contain control characters".to_string());
     }
-    if url.contains('?') || url.contains('#') {
-        return Err(format!("{field_name} must not contain query or fragment"));
-    }
-    if url.bytes().any(|byte| byte <= b' ') {
-        return Err(format!("{field_name} must not contain control characters"));
-    }
-    let authority = extract_https_authority(url)?;
-    if authority.contains('@') {
-        return Err(format!("{field_name} must not include userinfo"));
-    }
-    let (host, port) = split_host_and_port(authority)
-        .ok_or_else(|| format!("{field_name} must include a valid host"))?;
-    validate_host(host, field_name)?;
-    validate_port(port, field_name)?;
-    Ok(())
+    let trimmed = ii_origin.trim_end_matches('/');
+    canonicalize_native_origin_string(trimmed).map_err(|err| format!("ii origin {err}"))
 }
 
 fn canonicalize_native_origin_string(origin: &str) -> Result<String, String> {
@@ -1108,6 +1096,15 @@ mod tests {
         assert!(validate_issuer_origin("https://identity.ic0.app:443").is_ok());
         assert!(validate_issuer_origin("https://identity.ic0.app/").is_err());
         assert!(validate_issuer_origin("https://identity.ic0.app/path").is_err());
+    }
+
+    #[test]
+    fn should_canonicalize_ii_origin_with_optional_trailing_slash() {
+        assert_eq!(
+            canonicalize_ii_origin("https://identity.ic0.app/").unwrap(),
+            "https://identity.ic0.app"
+        );
+        assert!(canonicalize_ii_origin("https://identity.ic0.app/path").is_err());
     }
 
     #[test]

@@ -407,6 +407,27 @@ fn should_reject_loopback_redirect_uri_with_unregistered_origin() -> Result<(), 
 }
 
 #[test]
+fn should_reject_ii_origin_with_path() -> Result<(), RejectResponse> {
+    let env = env();
+    let mut request = native_request();
+    request.ii_origin = "https://identity.test/foo".to_string();
+    let canister_id = install_native_oidc_ii(
+        &env,
+        vec![native_client_config(
+            &request.client_id,
+            vec![request.redirect_uri.clone()],
+        )],
+    );
+
+    let result = api::prepare_native_authorization(&env, canister_id, &request)?;
+    assert!(matches!(
+        result,
+        Err(PrepareNativeAuthorizationError::InvalidOrigin(_))
+    ));
+    Ok(())
+}
+
+#[test]
 fn should_reject_non_reverse_domain_private_use_scheme() -> Result<(), RejectResponse> {
     let env = env();
     let mut request = native_request();
