@@ -169,9 +169,7 @@ fn should_complete_redeem_oidc_token_and_exchange_native_authorization(
         ),
     )?
     .expect("redeem should succeed");
-    assert!(token_response
-        .token_type
-        .contains("/oauth/token-type/native-access-token"));
+    assert_eq!(token_response.token_type, "Bearer");
     assert!(!token_response.access_token.is_empty());
     assert!(token_response.expires_in > 0);
 
@@ -188,10 +186,7 @@ fn should_complete_redeem_oidc_token_and_exchange_native_authorization(
     assert_ne!(claims.sub, anchor_number.to_string());
     assert_eq!(claims.nonce, request.nonce);
     assert!(claims.exp > 0);
-    assert_eq!(
-        token_response.token_type,
-        format!("{DEFAULT_TRUSTED_ISSUER_ORIGIN}/oauth/token-type/native-access-token")
-    );
+    assert_eq!(token_response.token_type, "Bearer");
 
     let exchanged = api::exchange_native_access_token_for_delegation(
         &env,
@@ -667,10 +662,7 @@ fn should_not_use_caller_supplied_ii_origin_for_signed_issuer() -> Result<(), Re
 
     assert_eq!(claims.iss, DEFAULT_TRUSTED_ISSUER_ORIGIN);
     assert_ne!(claims.iss, request.ii_origin);
-    assert_eq!(
-        token_response.token_type,
-        format!("{DEFAULT_TRUSTED_ISSUER_ORIGIN}/oauth/token-type/native-access-token")
-    );
+    assert_eq!(token_response.token_type, "Bearer");
     Ok(())
 }
 
@@ -723,10 +715,7 @@ fn should_use_configured_issuer_for_signed_tokens() -> Result<(), RejectResponse
     .expect("claims should parse");
 
     assert_eq!(claims.iss, configured_issuer);
-    assert_eq!(
-        token_response.token_type,
-        format!("{configured_issuer}/oauth/token-type/native-access-token")
-    );
+    assert_eq!(token_response.token_type, "Bearer");
     Ok(())
 }
 

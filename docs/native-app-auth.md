@@ -120,15 +120,14 @@ const { delegationChain } = await fetchIcDelegation({
   - `status`
     - HTTP status when the backend responded
   - `code`
-    - backend error code such as `expired`, `not_found`, `invalid_token`
+    - backend error code such as `invalid_request` or `invalid_token`
     - `invalid_configuration` for bad helper input
   - `message`
     - backend `error_description` when present, otherwise a synthesized message
 
-Helper does not poll or retry. Usual usage should not add app-level retries for
-`expired`, `not_found`, or `invalid_token`; those are terminal contract errors.
-Network retries are only relevant for transport failures where no valid backend error
-response was received.
+Helper does not poll or retry token exchange errors. Delegation retrieval can be retried with the
+same access token until it expires when a network, gateway, certification, or local processing
+failure prevents the client from using a successful response.
 
 Native OIDC HTTP responses are cross-origin readable and return
 `Access-Control-Allow-Origin: *` on discovery, token, delegation, and JWKS.
@@ -141,9 +140,9 @@ path, but the token no longer needs to appear in the URL for new clients.
 Browser preflight for the `Authorization` header is supported by II CORS responses.
 
 `GET /oauth2/delegation?access_token=...` remains available as legacy compatibility. The access
-token is a short-lived exchange token, not a general Bearer token, but query transport can still
-surface it in server logs, proxies, or APM systems. Prefer the header transport and avoid copying
-or persisting legacy request URLs.
+token is a short-lived Bearer credential scoped to `/oauth2/delegation`, not a general-purpose II
+resource token. Query transport can still surface it in server logs, proxies, or APM systems.
+Prefer the header transport and avoid copying or persisting legacy request URLs.
 
 ## Compatibility And Limitations
 
@@ -170,6 +169,8 @@ Rejected redirect URIs include:
 - Query strings or fragments
 - Userinfo
 - Arbitrary short custom schemes such as `myapp:/callback`
+- Non-lowercase or ambiguous private-use schemes such as `Com.Example.App:/callback`,
+  `1.example:/callback`, or `com.-example.app:/callback`
 
 For claimed HTTPS redirects, `redirect_uri` must match the prepared `origin`. Private-use and
 loopback redirects are validated by URI class, registered `redirect_uri` membership, and registered
@@ -184,6 +185,11 @@ so native apps can use an ephemeral port per authorization request.
 - `redirect_uri`
 - `state`
 - `scope` including `openid`
+  - Represented as repeated Candid strings rather than as a single space-delimited OAuth `scope`
+    parameter.
+  - At most 16 values.
+  - Each value must be non-empty visible ASCII and at most 64 bytes.
+  - Duplicate values are rejected.
 - `nonce`
 - `code_challenge`
   - Must satisfy RFC 7636 length bounds: 43-128 characters.
@@ -209,7 +215,11 @@ redirects add one extra check: `origin` must match the redirect origin.
 
 ## Token Semantics
 
-- `access_token` is an II-specific exchange token. It is not a Bearer token for arbitrary HTTP resources.
+- `access_token` is a short-lived Bearer token for `/oauth2/delegation` only. It is not a
+  general-purpose II resource token.
+- The access token may be used more than once with `/oauth2/delegation` until it expires. This lets
+  clients retry retrieval of the same certified delegation after transient failures. Clients must
+  not persist it beyond the login flow.
 - `id_token` is signed with II-managed RSA keys and can be verified via `/.well-known/openid-configuration` and `/oauth2/jwks`.
 - `id_token.sub` is pairwise per `client_id`; it is no longer the anchor number.
 - IC delegation is only returned by `exchange_native_access_token_for_delegation`.

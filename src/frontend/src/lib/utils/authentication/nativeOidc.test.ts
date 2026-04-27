@@ -17,7 +17,7 @@ const discoveryBody = JSON.stringify({
 
 const tokenBody = JSON.stringify({
   access_token: "native-access-token",
-  token_type: "https://identity.ic0.app/oauth/token-type/native-access-token",
+  token_type: "Bearer",
   expires_in: 300,
   id_token: "header.payload.signature",
 });
@@ -267,7 +267,13 @@ describe("nativeOidc", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
-        jsonResponse(JSON.stringify({ error: "expired" }), 401),
+        jsonResponse(
+          JSON.stringify({
+            error: "invalid_token",
+            error_description: "access token expired",
+          }),
+          401,
+        ),
       );
 
     await expect(
@@ -279,17 +285,18 @@ describe("nativeOidc", () => {
     ).rejects.toMatchObject({
       name: "NativeOidcError",
       phase: "delegation",
-      code: "expired",
+      code: "invalid_token",
       status: 401,
+      message: "access token expired",
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("surfaces not_found and invalid_token responses without retries", async () => {
-    const notFoundFetch = vi
+  it("surfaces invalid_token responses without retries", async () => {
+    const missingTokenFetch = vi
       .fn()
       .mockResolvedValueOnce(
-        jsonResponse(JSON.stringify({ error: "not_found" }), 404),
+        jsonResponse(JSON.stringify({ error: "invalid_token" }), 401),
       );
     const invalidTokenFetch = vi.fn().mockResolvedValueOnce(
       jsonResponse(
@@ -304,13 +311,13 @@ describe("nativeOidc", () => {
     await expect(
       fetchIcDelegation({
         delegationEndpoint: "https://identity.ic0.app/oauth2/delegation",
-        fetchFn: notFoundFetch,
+        fetchFn: missingTokenFetch,
         accessToken: "missing-token",
       }),
     ).rejects.toMatchObject({
       phase: "delegation",
-      code: "not_found",
-      status: 404,
+      code: "invalid_token",
+      status: 401,
     });
     await expect(
       fetchIcDelegation({
@@ -324,9 +331,9 @@ describe("nativeOidc", () => {
       status: 401,
       message: "delegation is not available for the access token",
     });
-    expect(notFoundFetch).toHaveBeenCalledTimes(1);
+    expect(missingTokenFetch).toHaveBeenCalledTimes(1);
     expect(invalidTokenFetch).toHaveBeenCalledTimes(1);
-    expect(notFoundFetch).toHaveBeenCalledWith(
+    expect(missingTokenFetch).toHaveBeenCalledWith(
       "https://identity.ic0.app/oauth2/delegation",
       expect.objectContaining({
         method: "GET",

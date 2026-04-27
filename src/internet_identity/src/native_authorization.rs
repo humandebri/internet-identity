@@ -29,6 +29,7 @@ use rsa::RsaPrivateKey;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::cell::RefCell;
+use std::collections::BTreeSet;
 
 const REQUEST_ID_NUM_BYTES: usize = 32;
 const TOKEN_NUM_BYTES: usize = 32;
@@ -38,13 +39,14 @@ const ORIGIN_MAX_BYTES: usize = 255;
 const STATE_MAX_BYTES: usize = 512;
 const NONCE_MAX_BYTES: usize = 512;
 const CLIENT_ID_MAX_BYTES: usize = 255;
+const MAX_SCOPES: usize = 16;
+const MAX_SCOPE_VALUE_BYTES: usize = 64;
 const PKCE_MIN_BYTES: usize = 43;
 const PKCE_MAX_BYTES: usize = 128;
 const PENDING_REQUEST_TTL_NS: u64 = 5 * 60 * 1_000_000_000;
 const CODE_TTL_NS: u64 = 5 * 60 * 1_000_000_000;
 const COMPLETED_REQUEST_GRACE_PERIOD_NS: u64 = 10 * 60 * 1_000_000_000;
 const ACCESS_TOKEN_TTL_NS: u64 = 5 * 60 * 1_000_000_000;
-const TOKEN_TYPE_SEGMENT: &str = "/oauth/token-type/native-access-token";
 const DEFAULT_NATIVE_OIDC_ISSUER_ORIGIN: &str = "https://identity.internetcomputer.org";
 
 thread_local! {
@@ -328,7 +330,7 @@ pub async fn redeem_code(
 
     Ok(RedeemNativeAuthorizationCodeResponse {
         access_token,
-        token_type: native_token_type_uri(&record.issuer),
+        token_type: "Bearer".to_string(),
         expires_in: nanos_to_secs(ACCESS_TOKEN_TTL_NS),
         id_token,
     })
@@ -541,11 +543,28 @@ fn validate_client_config(config: &NativeOidcClientConfig) -> Result<(), String>
 }
 
 fn validate_scopes(scope: &[String]) -> Result<(), String> {
-    if !scope.iter().any(|value| value == "openid") {
-        return Err("scope must include `openid`".to_string());
-    }
     if scope.is_empty() {
         return Err("scope must not be empty".to_string());
+    }
+    if scope.len() > MAX_SCOPES {
+        return Err(format!(
+            "scope must not include more than {MAX_SCOPES} values"
+        ));
+    }
+    let mut seen = BTreeSet::new();
+    let mut has_openid = false;
+    for value in scope {
+        validate_scalar_field("scope", value, MAX_SCOPE_VALUE_BYTES)?;
+        if !value.bytes().all(|byte| byte.is_ascii_graphic()) {
+            return Err("scope values must use visible ASCII characters".to_string());
+        }
+        if !seen.insert(value) {
+            return Err("scope must not contain duplicate values".to_string());
+        }
+        has_openid |= value == "openid";
+    }
+    if !has_openid {
+        return Err("scope must include `openid`".to_string());
     }
     Ok(())
 }
@@ -695,14 +714,25 @@ fn parse_loopback_redirect_uri(redirect_uri: &str) -> Result<LoopbackRedirectUri
 }
 
 fn is_reverse_domain_scheme(scheme: &str) -> bool {
+    if !matches!(scheme.as_bytes().first(), Some(b'a'..=b'z')) {
+        return false;
+    }
+    if !scheme.bytes().all(|byte| {
+        byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'.' || byte == b'-'
+    }) {
+        return false;
+    }
     let mut parts = scheme.split('.');
     let count = parts.clone().count();
     count >= 2
         && parts.all(|part| {
-            !part.is_empty()
-                && part
-                    .bytes()
-                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+            let bytes = part.as_bytes();
+            !bytes.is_empty()
+                && matches!(bytes.first(), Some(b'a'..=b'z' | b'0'..=b'9'))
+                && matches!(bytes.last(), Some(b'a'..=b'z' | b'0'..=b'9'))
+                && bytes
+                    .iter()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'-')
         })
 }
 
@@ -856,10 +886,6 @@ fn format_redirect_url(redirect_uri: &str, code: &str, state: &str) -> String {
     let code = percent_encode_query_value(code);
     let state = percent_encode_query_value(state);
     format!("{redirect_uri}?code={code}&state={state}")
-}
-
-fn native_token_type_uri(issuer: &str) -> String {
-    format!("{}{}", issuer.trim_end_matches('/'), TOKEN_TYPE_SEGMENT)
 }
 
 fn configured_issuer_origin() -> String {
@@ -1110,5 +1136,32 @@ mod tests {
             "http://127.0.0.1:49152/oauth2redirect/ii",
             "http://127.0.0.1:3000/other"
         ));
+    }
+
+    #[test]
+    fn should_reject_invalid_private_use_schemes() {
+        assert!(is_reverse_domain_scheme("com.example.app"));
+        assert!(!is_reverse_domain_scheme("1.example"));
+        assert!(!is_reverse_domain_scheme("com.-example.app"));
+        assert!(!is_reverse_domain_scheme("com.example-.app"));
+        assert!(!is_reverse_domain_scheme("com..example"));
+        assert!(!is_reverse_domain_scheme("Com.Example.App"));
+        assert!(!is_reverse_domain_scheme("com+example.app"));
+    }
+
+    #[test]
+    fn should_validate_scopes_strictly() {
+        assert!(validate_scopes(&["openid".to_string()]).is_ok());
+        assert!(validate_scopes(&[]).is_err());
+        assert!(validate_scopes(&["profile".to_string()]).is_err());
+        assert!(validate_scopes(&["openid".to_string(), "openid".to_string()]).is_err());
+        assert!(validate_scopes(&["openid profile".to_string()]).is_err());
+        assert!(validate_scopes(&["openid".to_string(), "x".repeat(65)]).is_err());
+        assert!(validate_scopes(
+            &std::iter::once("openid".to_string())
+                .chain((0..16).map(|i| format!("scope{i}")))
+                .collect::<Vec<_>>()
+        )
+        .is_err());
     }
 }

@@ -55,7 +55,7 @@ fn http_get_request(
         },
         "/oauth2/delegation" => {
             let Ok(access_token) = delegation_access_token(&headers, parts.get(1).copied()) else {
-                return sensitive_bad_request("missing access_token");
+                return delegation_invalid_request_response("missing or invalid access token");
             };
             match native_authorization::exchange_delegation(
                 internet_identity_interface::internet_identity::types::ExchangeNativeAccessTokenForDelegationRequest {
@@ -171,7 +171,7 @@ pub async fn http_request_update(req: HttpRequest) -> HttpResponse {
     match url.split('?').next().unwrap_or_default() {
         "/oauth2/token" => {
             let Ok(request) = parse_redeem_request(&headers, &body) else {
-                return sensitive_bad_request("invalid token request");
+                return oauth_invalid_request_response("invalid token request");
             };
             match native_authorization::redeem_code(RedeemNativeAuthorizationCodeRequest {
                 grant_type: request.grant_type,
@@ -231,18 +231,15 @@ fn server_error(message: String) -> HttpResponse {
     }
 }
 
-fn sensitive_bad_request(message: &str) -> HttpResponse {
-    HttpResponse {
-        status_code: 400,
-        headers: sensitive_plain_text_headers(message.len()),
-        body: ByteBuf::from(message.as_bytes().to_vec()),
-        upgrade: None,
-    }
-}
-
 fn sensitive_json_headers(content_length: usize) -> Vec<HeaderField> {
     let mut headers = json_headers(content_length);
     headers.extend(cache_control_headers());
+    headers
+}
+
+fn sensitive_bearer_json_headers(content_length: usize) -> Vec<HeaderField> {
+    let mut headers = sensitive_json_headers(content_length);
+    headers.push(("WWW-Authenticate".to_string(), "Bearer".to_string()));
     headers
 }
 
@@ -253,12 +250,6 @@ fn json_headers(content_length: usize) -> Vec<HeaderField> {
         ("Content-Length".to_string(), content_length.to_string()),
     ];
     headers.append(&mut security_headers(None));
-    headers
-}
-
-fn sensitive_plain_text_headers(content_length: usize) -> Vec<HeaderField> {
-    let mut headers = plain_text_headers(content_length);
-    headers.extend(cache_control_headers());
     headers
 }
 
@@ -312,11 +303,31 @@ fn bearer_access_token(headers: &[HeaderField]) -> Option<String> {
         if !name.eq_ignore_ascii_case("authorization") {
             return None;
         }
-        value
-            .strip_prefix("Bearer ")
-            .or_else(|| value.strip_prefix("bearer "))
-            .map(str::to_string)
+        let (scheme, token) = value.split_once(char::is_whitespace)?;
+        let token = token.trim_start();
+        if scheme.eq_ignore_ascii_case("bearer")
+            && !token.is_empty()
+            && token.bytes().all(|byte| !byte.is_ascii_whitespace())
+        {
+            Some(token.to_string())
+        } else {
+            None
+        }
     })
+}
+
+fn oauth_invalid_request_response(description: &str) -> HttpResponse {
+    let body = serde_json::to_vec(&json!({
+        "error": "invalid_request",
+        "error_description": description,
+    }))
+    .expect("oauth invalid request error should serialize");
+    HttpResponse {
+        status_code: 400,
+        headers: sensitive_json_headers(body.len()),
+        body: ByteBuf::from(body),
+        upgrade: None,
+    }
 }
 
 fn oauth_error_response(
@@ -357,18 +368,37 @@ fn delegation_exchange_error_response(
             (401, json!({"error": "invalid_token", "error_description": message}))
         }
         internet_identity_interface::internet_identity::types::ExchangeNativeAccessTokenForDelegationError::Expired => {
-            (401, json!({"error": "expired"}))
+            (401, json!({"error": "invalid_token", "error_description": "access token expired"}))
         }
         internet_identity_interface::internet_identity::types::ExchangeNativeAccessTokenForDelegationError::NotFound => {
-            (404, json!({"error": "not_found"}))
+            (401, json!({"error": "invalid_token"}))
         }
         internet_identity_interface::internet_identity::types::ExchangeNativeAccessTokenForDelegationError::InternalCanisterError(message) => {
             (500, json!({"error": "server_error", "error_description": message}))
         }
     };
     let body = serde_json::to_vec(&body).expect("exchange error should serialize");
+    let headers = if status_code == 401 {
+        sensitive_bearer_json_headers(body.len())
+    } else {
+        sensitive_json_headers(body.len())
+    };
     HttpResponse {
         status_code,
+        headers,
+        body: ByteBuf::from(body),
+        upgrade: None,
+    }
+}
+
+fn delegation_invalid_request_response(description: &str) -> HttpResponse {
+    let body = serde_json::to_vec(&json!({
+        "error": "invalid_request",
+        "error_description": description,
+    }))
+    .expect("delegation invalid request error should serialize");
+    HttpResponse {
+        status_code: 400,
         headers: sensitive_json_headers(body.len()),
         body: ByteBuf::from(body),
         upgrade: None,
@@ -424,7 +454,9 @@ fn parse_form_urlencoded(body: &[u8]) -> Result<BTreeMap<String, String>, String
         let mut parts = pair.splitn(2, '=');
         let key = percent_decode(parts.next().unwrap_or_default())?;
         let value = percent_decode(parts.next().unwrap_or_default())?;
-        fields.insert(key, value);
+        if fields.insert(key.clone(), value).is_some() {
+            return Err(format!("duplicate form field: {key}"));
+        }
     }
     Ok(fields)
 }
@@ -623,5 +655,20 @@ mod tests {
     fn should_decode_plus_in_form_urlencoded_values() {
         let fields = parse_form_urlencoded(b"nonce=hello+world").expect("form body should parse");
         assert_eq!(fields.get("nonce"), Some(&"hello world".to_string()));
+    }
+
+    #[test]
+    fn should_reject_duplicate_form_urlencoded_values() {
+        let err = parse_form_urlencoded(b"code=first&code=second").unwrap_err();
+        assert_eq!(err, "duplicate form field: code");
+    }
+
+    #[test]
+    fn should_parse_bearer_scheme_case_insensitively() {
+        let headers = vec![("Authorization".to_string(), "bEaReR token".to_string())];
+        assert_eq!(bearer_access_token(&headers), Some("token".to_string()));
+
+        let headers = vec![("Authorization".to_string(), "Bearer ".to_string())];
+        assert_eq!(bearer_access_token(&headers), None);
     }
 }

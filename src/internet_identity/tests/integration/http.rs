@@ -1083,6 +1083,7 @@ fn ii_canister_serves_native_oidc_token_and_delegation_http_endpoints() -> Resul
     let access_token = token_json["access_token"]
         .as_str()
         .expect("access_token should be present");
+    assert_eq!(token_json["token_type"], "Bearer");
 
     let delegation_preflight_response = http_request(
         &env,
@@ -1132,17 +1133,20 @@ fn ii_canister_serves_native_oidc_token_and_delegation_http_endpoints() -> Resul
         "authorization, content-type",
     );
 
-    let delegation_request = HttpRequest {
-        method: "GET".to_string(),
-        url: "/oauth2/delegation".to_string(),
-        headers: vec![(
-            "Authorization".to_string(),
-            format!("Bearer {access_token}"),
-        )],
-        body: ByteBuf::new(),
-        certificate_version: None,
-    };
-    let delegation_response = http_request(&env, canister_id, &delegation_request)?;
+    let delegation_response = http_request(
+        &env,
+        canister_id,
+        &HttpRequest {
+            method: "GET".to_string(),
+            url: "/oauth2/delegation".to_string(),
+            headers: vec![(
+                "Authorization".to_string(),
+                format!("bEaReR {access_token}"),
+            )],
+            body: ByteBuf::new(),
+            certificate_version: None,
+        },
+    )?;
     assert_eq!(delegation_response.status_code, 200);
     assert_cors_header(&delegation_response.headers);
     assert_no_store_headers(&delegation_response.headers);
@@ -1150,6 +1154,23 @@ fn ii_canister_serves_native_oidc_token_and_delegation_http_endpoints() -> Resul
         .expect("delegation response should parse");
     assert!(delegation_json.get("user_key").is_some());
     assert!(delegation_json.get("signed_delegation").is_some());
+
+    let repeated_delegation_response = http_request(
+        &env,
+        canister_id,
+        &HttpRequest {
+            method: "GET".to_string(),
+            url: "/oauth2/delegation".to_string(),
+            headers: vec![(
+                "Authorization".to_string(),
+                format!("Bearer {access_token}"),
+            )],
+            body: ByteBuf::new(),
+            certificate_version: None,
+        },
+    )?;
+    assert_eq!(repeated_delegation_response.status_code, 200);
+    assert_no_store_headers(&repeated_delegation_response.headers);
 
     let query_fallback_response = http_request(
         &env,
@@ -1205,6 +1226,31 @@ fn ii_canister_serves_native_oidc_token_and_delegation_http_endpoints() -> Resul
     assert_eq!(token_error_response.status_code, 400);
     assert_no_store_headers(&token_error_response.headers);
 
+    let duplicate_token_field_response = http_request_update(
+        &env,
+        canister_id,
+        &HttpRequest {
+            method: "POST".to_string(),
+            url: "/oauth2/token".to_string(),
+            headers: vec![(
+                "Content-Type".to_string(),
+                "application/x-www-form-urlencoded".to_string(),
+            )],
+            body: ByteBuf::from(
+                format!(
+                    "grant_type=authorization_code&code={}&code=other&redirect_uri={}&code_verifier={}&client_id={}",
+                    prepared.request_id, redirect_uri, verifier, client_id
+                )
+                .into_bytes(),
+            ),
+            certificate_version: None,
+        },
+    )?;
+    assert_eq!(duplicate_token_field_response.status_code, 400);
+    let duplicate_token_json: Value = serde_json::from_slice(&duplicate_token_field_response.body)
+        .expect("duplicate token error should parse");
+    assert_eq!(duplicate_token_json["error"], "invalid_request");
+
     let delegation_error_response = http_request(
         &env,
         canister_id,
@@ -1216,8 +1262,42 @@ fn ii_canister_serves_native_oidc_token_and_delegation_http_endpoints() -> Resul
             certificate_version: None,
         },
     )?;
-    assert_eq!(delegation_error_response.status_code, 404);
+    assert_eq!(delegation_error_response.status_code, 401);
     assert_no_store_headers(&delegation_error_response.headers);
+    assert_header_value(
+        &delegation_error_response.headers,
+        "WWW-Authenticate",
+        "Bearer",
+    );
+    let delegation_error_json: Value = serde_json::from_slice(&delegation_error_response.body)
+        .expect("delegation error should parse");
+    assert_eq!(delegation_error_json["error"], "invalid_token");
+
+    env.advance_time(Duration::from_secs(5 * 60 + 1));
+    env.tick();
+    let expired_delegation_response = http_request(
+        &env,
+        canister_id,
+        &HttpRequest {
+            method: "GET".to_string(),
+            url: "/oauth2/delegation".to_string(),
+            headers: vec![(
+                "Authorization".to_string(),
+                format!("Bearer {access_token}"),
+            )],
+            body: ByteBuf::new(),
+            certificate_version: None,
+        },
+    )?;
+    assert_eq!(expired_delegation_response.status_code, 401);
+    assert_header_value(
+        &expired_delegation_response.headers,
+        "WWW-Authenticate",
+        "Bearer",
+    );
+    let expired_delegation_json: Value = serde_json::from_slice(&expired_delegation_response.body)
+        .expect("expired delegation error should parse");
+    assert_eq!(expired_delegation_json["error"], "invalid_token");
 
     let delegation_missing_token_response = http_request(
         &env,
@@ -1232,6 +1312,27 @@ fn ii_canister_serves_native_oidc_token_and_delegation_http_endpoints() -> Resul
     )?;
     assert_eq!(delegation_missing_token_response.status_code, 400);
     assert_no_store_headers(&delegation_missing_token_response.headers);
+    let delegation_missing_token_json: Value =
+        serde_json::from_slice(&delegation_missing_token_response.body)
+            .expect("missing delegation token error should parse");
+    assert_eq!(delegation_missing_token_json["error"], "invalid_request");
+
+    let duplicate_query_token_response = http_request(
+        &env,
+        canister_id,
+        &HttpRequest {
+            method: "GET".to_string(),
+            url: "/oauth2/delegation?access_token=one&access_token=two".to_string(),
+            headers: vec![],
+            body: ByteBuf::new(),
+            certificate_version: None,
+        },
+    )?;
+    assert_eq!(duplicate_query_token_response.status_code, 400);
+    let duplicate_query_token_json: Value =
+        serde_json::from_slice(&duplicate_query_token_response.body)
+            .expect("duplicate delegation token error should parse");
+    assert_eq!(duplicate_query_token_json["error"], "invalid_request");
 
     let token_method_response = http_request(
         &env,
