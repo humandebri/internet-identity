@@ -614,6 +614,23 @@ export const idlFactory = ({ IDL }) => {
     'authorize_url' : IDL.Text,
     'expires_at' : Timestamp,
   });
+  const StartNativeAuthorizationRequest = IDL.Record({
+    'client_id' : IDL.Text,
+    'scope' : IDL.Text,
+    'nonce' : IDL.Text,
+    'code_challenge_method' : IDL.Text,
+    'state' : IDL.Text,
+    'redirect_uri' : IDL.Text,
+    'response_type' : IDL.Text,
+    'origin' : FrontendHostname,
+    'code_challenge' : IDL.Text,
+    'max_time_to_live' : IDL.Opt(IDL.Nat64),
+    'session_public_key' : SessionKey,
+  });
+  const StartNativeAuthorizationResponse = IDL.Record({
+    'request_id' : IDL.Text,
+    'expires_at' : Timestamp,
+  });
   const PrepareNativeAuthorizationError = IDL.Variant({
     'internal_canister_error' : IDL.Text,
     'invalid_request' : IDL.Text,
@@ -1086,6 +1103,16 @@ export const idlFactory = ({ IDL }) => {
         [
           IDL.Variant({
             'Ok' : PrepareNativeAuthorizationResponse,
+            'Err' : PrepareNativeAuthorizationError,
+          }),
+        ],
+        [],
+      ),
+    'start_native_authorization' : IDL.Func(
+        [StartNativeAuthorizationRequest],
+        [
+          IDL.Variant({
+            'Ok' : StartNativeAuthorizationResponse,
             'Err' : PrepareNativeAuthorizationError,
           }),
         ],

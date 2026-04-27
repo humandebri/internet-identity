@@ -135,6 +135,24 @@ pub fn prepare_native_authorization(
     .map(|(x,)| x)
 }
 
+pub fn start_native_authorization(
+    env: &PocketIc,
+    canister_id: CanisterId,
+    request: &types::StartNativeAuthorizationRequest,
+) -> Result<
+    Result<types::StartNativeAuthorizationResponse, types::PrepareNativeAuthorizationError>,
+    RejectResponse,
+> {
+    call_candid(
+        env,
+        canister_id,
+        RawEffectivePrincipal::None,
+        "start_native_authorization",
+        (request,),
+    )
+    .map(|(x,)| x)
+}
+
 pub fn get_native_authorization_request(
     env: &PocketIc,
     canister_id: CanisterId,

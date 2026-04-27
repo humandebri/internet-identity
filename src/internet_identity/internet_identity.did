@@ -193,6 +193,25 @@ type PrepareNativeAuthorizationResponse = record {
     expires_at : Timestamp;
 };
 
+type StartNativeAuthorizationRequest = record {
+    origin : FrontendHostname;
+    session_public_key : SessionKey;
+    redirect_uri : text;
+    client_id : text;
+    state : text;
+    scope : text;
+    nonce : text;
+    code_challenge : text;
+    code_challenge_method : text;
+    response_type : text;
+    max_time_to_live : opt nat64;
+};
+
+type StartNativeAuthorizationResponse = record {
+    request_id : text;
+    expires_at : Timestamp;
+};
+
 type NativeAuthorizationRequest = record {
     origin : FrontendHostname;
     redirect_uri : text;
@@ -1264,6 +1283,7 @@ service : (opt InternetIdentityInit) -> {
     prepare_delegation : (UserNumber, FrontendHostname, SessionKey, maxTimeToLive : opt nat64) -> (UserKey, Timestamp);
     get_delegation : (UserNumber, FrontendHostname, SessionKey, Timestamp) -> (GetDelegationResponse) query;
     prepare_native_authorization : (PrepareNativeAuthorizationRequest) -> (variant { Ok : PrepareNativeAuthorizationResponse; Err : PrepareNativeAuthorizationError });
+    start_native_authorization : (StartNativeAuthorizationRequest) -> (variant { Ok : StartNativeAuthorizationResponse; Err : PrepareNativeAuthorizationError });
     get_native_authorization_request : (request_id : text) -> (variant { Ok : NativeAuthorizationRequest; Err : GetNativeAuthorizationRequestError }) query;
     complete_native_authorization : (
         anchor_number : UserNumber,

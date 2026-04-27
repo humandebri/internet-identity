@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { Ed25519KeyIdentity } from "@icp-sdk/core/identity";
 import {
+  buildNativeOidcAuthorizationUrl,
   completeNativeOidcLogin,
   exchangeNativeOidcCode,
   fetchNativeOidcDiscovery,
@@ -82,6 +83,33 @@ describe("nativeOidc", () => {
         fetchFn: fetchMock,
       }),
     ).rejects.toThrow("authorization_endpoint must be a string");
+  });
+
+  it("builds a standard authorization URL with IC extension parameters", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(discoveryBody));
+
+    const authorizationUrl = await buildNativeOidcAuthorizationUrl({
+      issuer: "https://identity.ic0.app",
+      fetchFn: fetchMock,
+      clientId: "com.example.app",
+      redirectUri: "com.example.app:/oauth2redirect/ii",
+      state: "state-123",
+      nonce: "nonce-123",
+      codeChallenge: "challenge-123",
+      origin: "https://app.example.com",
+      sessionPublicKey: new Uint8Array([1, 2, 3]),
+      maxTimeToLive: BigInt(300),
+    });
+
+    const url = new URL(authorizationUrl);
+    expect(url.origin + url.pathname).toBe("https://identity.ic0.app/authorize");
+    expect(url.searchParams.get("response_type")).toBe("code");
+    expect(url.searchParams.get("client_id")).toBe("com.example.app");
+    expect(url.searchParams.get("scope")).toBe("openid");
+    expect(url.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(url.searchParams.get("ic_origin")).toBe("https://app.example.com");
+    expect(url.searchParams.get("ic_session_public_key")).toBe("AQID");
+    expect(url.searchParams.get("ic_max_time_to_live")).toBe("300");
   });
 
   it("resolves discovery and exchanges a native OIDC code", async () => {

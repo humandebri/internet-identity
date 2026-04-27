@@ -1119,6 +1119,23 @@ export interface PrepareNativeAuthorizationResponse {
   'authorize_url' : string,
   'expires_at' : Timestamp,
 }
+export interface StartNativeAuthorizationRequest {
+  'client_id' : string,
+  'scope' : string,
+  'nonce' : string,
+  'code_challenge_method' : string,
+  'state' : string,
+  'redirect_uri' : string,
+  'response_type' : string,
+  'origin' : FrontendHostname,
+  'code_challenge' : string,
+  'max_time_to_live' : [] | [bigint],
+  'session_public_key' : SessionKey,
+}
+export interface StartNativeAuthorizationResponse {
+  'request_id' : string,
+  'expires_at' : Timestamp,
+}
 export type RedeemNativeAuthorizationCodeError = {
     'invalid_grant' : string
   } |
@@ -1657,6 +1674,11 @@ export interface _SERVICE {
   'prepare_native_authorization' : ActorMethod<
     [PrepareNativeAuthorizationRequest],
     { 'Ok' : PrepareNativeAuthorizationResponse } |
+      { 'Err' : PrepareNativeAuthorizationError }
+  >,
+  'start_native_authorization' : ActorMethod<
+    [StartNativeAuthorizationRequest],
+    { 'Ok' : StartNativeAuthorizationResponse } |
       { 'Err' : PrepareNativeAuthorizationError }
   >,
   'register' : ActorMethod<

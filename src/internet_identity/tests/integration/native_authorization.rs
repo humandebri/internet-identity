@@ -36,6 +36,23 @@ fn native_request() -> PrepareNativeAuthorizationRequest {
     }
 }
 
+fn start_request() -> StartNativeAuthorizationRequest {
+    let request = native_request();
+    StartNativeAuthorizationRequest {
+        origin: request.origin,
+        session_public_key: request.session_public_key,
+        redirect_uri: request.redirect_uri,
+        client_id: request.client_id,
+        state: request.state,
+        scope: request.scope.join(" "),
+        nonce: request.nonce,
+        code_challenge: request.code_challenge,
+        code_challenge_method: request.code_challenge_method,
+        response_type: request.response_type,
+        max_time_to_live: request.max_time_to_live,
+    }
+}
+
 fn redeem_request(
     code: &str,
     redirect_uri: &str,
@@ -143,6 +160,51 @@ fn complete_request(
     )?
     .expect("completion should succeed");
     Ok(authorization_code(&completed.redirect_url))
+}
+
+#[test]
+fn should_start_native_authorization_from_oidc_authorize_request() -> Result<(), RejectResponse> {
+    let env = env();
+    let request = start_request();
+    let canister_id = install_native_oidc_ii(
+        &env,
+        vec![native_client_config(
+            &request.client_id,
+            vec![request.redirect_uri.clone()],
+        )],
+    );
+    let anchor_number = flows::register_anchor(&env, canister_id);
+
+    let started = api::start_native_authorization(&env, canister_id, &request)?
+        .expect("start native authorization should succeed");
+    assert!(!started.request_id.is_empty());
+
+    let completed = api::complete_native_authorization(
+        &env,
+        canister_id,
+        principal_1(),
+        anchor_number,
+        &started.request_id,
+        None,
+    )?
+    .expect("completion should succeed");
+    let code = authorization_code(&completed.redirect_url);
+    assert_ne!(code, started.request_id);
+    assert_eq!(
+        completed.redirect_url,
+        format!(
+            "{}?code={}&state={}",
+            request.redirect_uri, code, request.state
+        )
+    );
+
+    api::redeem_native_authorization_code(
+        &env,
+        canister_id,
+        &redeem_request(&code, &request.redirect_uri, &request.client_id),
+    )?
+    .expect("redeem should succeed");
+    Ok(())
 }
 
 #[test]

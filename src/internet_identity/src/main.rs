@@ -363,6 +363,13 @@ async fn prepare_native_authorization(
     native_authorization::prepare(request).await
 }
 
+#[update]
+async fn start_native_authorization(
+    request: StartNativeAuthorizationRequest,
+) -> Result<StartNativeAuthorizationResponse, PrepareNativeAuthorizationError> {
+    native_authorization::start(request).await
+}
+
 #[query]
 fn get_native_authorization_request(
     request_id: String,

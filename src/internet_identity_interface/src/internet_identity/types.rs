@@ -172,6 +172,27 @@ pub struct PrepareNativeAuthorizationResponse {
 }
 
 #[derive(Clone, Debug, CandidType, Deserialize)]
+pub struct StartNativeAuthorizationRequest {
+    pub origin: FrontendHostname,
+    pub session_public_key: SessionKey,
+    pub redirect_uri: String,
+    pub client_id: String,
+    pub state: String,
+    pub scope: String,
+    pub nonce: String,
+    pub code_challenge: String,
+    pub code_challenge_method: String,
+    pub response_type: String,
+    pub max_time_to_live: Option<u64>,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub struct StartNativeAuthorizationResponse {
+    pub request_id: String,
+    pub expires_at: Timestamp,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
 pub struct NativeAuthorizationRequest {
     pub origin: FrontendHostname,
     pub redirect_uri: String,
