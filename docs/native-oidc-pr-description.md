@@ -4,9 +4,9 @@
 
 This PR updates Internet Identity native browser authorization from the original
 `prepare -> browser -> callback(native_request_id) -> fetch_native_delegation`
-shape to an OAuth-style split flow:
+shape to a discovery-first OAuth-style split flow:
 
-`prepare -> browser authorize -> redirect_uri?code=...&state=... -> POST /oauth2/token -> GET /oauth2/delegation`
+`GET /.well-known/openid-configuration -> browser authorize -> redirect_uri?code=...&state=... -> POST /oauth2/token -> GET /oauth2/delegation`
 
 The PR scope is:
 
@@ -36,7 +36,8 @@ The PR scope is:
   - `GET /oauth2/delegation`
   - `GET /.well-known/openid-configuration`
   - `GET /oauth2/jwks`
-- Discovery now exposes the II-specific extension field `ic_delegation_endpoint`.
+- Discovery exposes standard `authorization_endpoint` and `token_endpoint` metadata, plus the
+  II-specific extension field `ic_delegation_endpoint`.
 
 ### Frontend helper
 
@@ -44,6 +45,8 @@ The PR scope is:
   - `exchangeNativeOidcCode`
   - `fetchIcDelegation`
   - `completeNativeOidcLogin`
+- Helper endpoint resolution starts from `/.well-known/openid-configuration` when an `issuer` is
+  provided.
 - The helper keeps the wire protocol 2-step, but exposes a single higher-level login flow for app
   integrations.
 

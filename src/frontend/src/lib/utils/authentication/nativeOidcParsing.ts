@@ -10,6 +10,7 @@ import { Principal } from "@icp-sdk/core/principal";
 
 export type NativeOidcDiscoveryDocument = {
   issuer: string;
+  authorizationEndpoint: string;
   tokenEndpoint: string;
   icDelegationEndpoint: string;
 };
@@ -96,6 +97,7 @@ export const parseDiscoveryDocument = (
   const record = expectRecord(value, "native OIDC discovery");
   return {
     issuer: expectString(record, "issuer"),
+    authorizationEndpoint: expectString(record, "authorization_endpoint"),
     tokenEndpoint: expectString(record, "token_endpoint"),
     icDelegationEndpoint: expectString(record, "ic_delegation_endpoint"),
   };

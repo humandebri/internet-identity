@@ -175,7 +175,11 @@ export const completeNativeOidcLogin = async (
 
 const resolveNativeOidcEndpoints = async (
   input: NativeOidcCodeExchangeEndpointConfig & NativeOidcDelegationEndpointConfig,
-): Promise<{ tokenEndpoint: string; delegationEndpoint: string }> => {
+): Promise<{
+  authorizationEndpoint?: string;
+  tokenEndpoint: string;
+  delegationEndpoint: string;
+}> => {
   if (
     input.tokenEndpoint !== undefined &&
     input.delegationEndpoint !== undefined
@@ -195,6 +199,7 @@ const resolveNativeOidcEndpoints = async (
     fetchFn: input.fetchFn,
   });
   return {
+    authorizationEndpoint: discovery.authorizationEndpoint,
     tokenEndpoint: input.tokenEndpoint ?? discovery.tokenEndpoint,
     delegationEndpoint:
       input.delegationEndpoint ?? discovery.icDelegationEndpoint,

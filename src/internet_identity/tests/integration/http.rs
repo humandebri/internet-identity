@@ -972,6 +972,10 @@ fn ii_canister_serves_openid_configuration_and_jwks() -> Result<(), RejectRespon
         "https://identity.ic0.app/authorize"
     );
     assert_eq!(
+        configuration_json["token_endpoint"],
+        "https://identity.ic0.app/oauth2/token"
+    );
+    assert_eq!(
         configuration_json["ic_delegation_endpoint"],
         "https://identity.ic0.app/oauth2/delegation"
     );

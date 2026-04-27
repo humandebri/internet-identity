@@ -3,6 +3,7 @@ import { Ed25519KeyIdentity } from "@icp-sdk/core/identity";
 import {
   completeNativeOidcLogin,
   exchangeNativeOidcCode,
+  fetchNativeOidcDiscovery,
   fetchIcDelegation,
 } from "./nativeOidc";
 
@@ -48,6 +49,41 @@ const targetedDelegationBody = `{
 }`;
 
 describe("nativeOidc", () => {
+  it("parses native login endpoints from discovery", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(discoveryBody));
+
+    const discovery = await fetchNativeOidcDiscovery({
+      issuer: "https://identity.ic0.app",
+      fetchFn: fetchMock,
+    });
+
+    expect(discovery).toEqual({
+      issuer: "https://identity.ic0.app",
+      authorizationEndpoint: "https://identity.ic0.app/authorize",
+      tokenEndpoint: "https://identity.ic0.app/oauth2/token",
+      icDelegationEndpoint: "https://identity.ic0.app/oauth2/delegation",
+    });
+  });
+
+  it("rejects discovery without authorization_endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse(
+        JSON.stringify({
+          issuer: "https://identity.ic0.app",
+          token_endpoint: "https://identity.ic0.app/oauth2/token",
+          ic_delegation_endpoint: "https://identity.ic0.app/oauth2/delegation",
+        }),
+      ),
+    );
+
+    await expect(
+      fetchNativeOidcDiscovery({
+        issuer: "https://identity.ic0.app",
+        fetchFn: fetchMock,
+      }),
+    ).rejects.toThrow("authorization_endpoint must be a string");
+  });
+
   it("resolves discovery and exchanges a native OIDC code", async () => {
     const fetchMock = vi
       .fn()

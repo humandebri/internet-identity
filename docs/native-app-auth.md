@@ -1,15 +1,17 @@
 # Native Browser Authorization
 
-II native browser authorization now follows an OAuth-style split flow:
+II native browser authorization now follows a discovery-first OAuth-style split flow:
 
-1. Native app calls `prepare_native_authorization`.
-2. II returns `authorize_url` and short-lived `request_id`.
-3. Native app opens `authorize_url` in a browser.
+1. Native app reads `/.well-known/openid-configuration`.
+2. II returns `authorization_endpoint`, `token_endpoint`, and the IC extension
+   `ic_delegation_endpoint`.
+3. Native app prepares the II native authorization request and opens the discovered
+   authorization endpoint URL in a browser.
 4. II completes user authentication on `/authorize`.
 5. II redirects to `redirect_uri?code=<request_id>&state=<state>`.
-6. Native app redeems the code with `redeem_native_authorization_code`.
+6. Native app redeems the code at the discovered `token_endpoint`.
 7. II returns a short-lived II-native `access_token`, `token_type`, `expires_in`, and `id_token`.
-8. Native app calls `exchange_native_access_token_for_delegation`.
+8. Native app fetches the IC delegation from the discovered `ic_delegation_endpoint`.
 9. II returns the regular IC delegation (`user_key` and `signed_delegation`).
 
 ## DX Model
@@ -21,8 +23,9 @@ II native browser authorization now follows an OAuth-style split flow:
   - Use any standard OIDC client for the authorization code exchange.
   - Add one thin II-specific helper call for certified delegation retrieval.
 
-`ic_delegation_endpoint` is exposed as a discovery extension field. Standard OIDC clients can
-ignore it safely.
+`authorization_endpoint` and `token_endpoint` are standard OIDC discovery fields.
+`ic_delegation_endpoint` is an IC-specific discovery extension field. Standard OIDC clients can
+ignore the extension safely.
 
 ## Frontend Helper
 
@@ -96,7 +99,8 @@ const { delegationChain } = await fetchIcDelegation({
 
 - `issuer` only
   - Helper reads discovery.
-  - `token_endpoint` and `ic_delegation_endpoint` come from the discovery document.
+  - `authorization_endpoint`, `token_endpoint`, and `ic_delegation_endpoint` come from the
+    discovery document.
 - `tokenEndpoint` only
   - `exchangeNativeOidcCode(...)` can use it directly.
 - `delegationEndpoint` only
