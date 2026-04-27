@@ -1116,7 +1116,6 @@ export interface PrepareNativeAuthorizationRequest {
   'session_public_key' : SessionKey,
 }
 export interface PrepareNativeAuthorizationResponse {
-  'request_id' : string,
   'authorize_url' : string,
   'expires_at' : Timestamp,
 }

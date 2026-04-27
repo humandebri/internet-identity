@@ -189,7 +189,6 @@ type PrepareNativeAuthorizationRequest = record {
 };
 
 type PrepareNativeAuthorizationResponse = record {
-    request_id : text;
     authorize_url : text;
     expires_at : Timestamp;
 };

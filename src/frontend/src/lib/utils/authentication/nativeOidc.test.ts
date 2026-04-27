@@ -123,6 +123,32 @@ describe("nativeOidc", () => {
     expect(String(tokenInit?.body)).toContain("client_id=com.example.app");
   });
 
+  it("rejects discovery when returned issuer does not match requested issuer", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse(
+        JSON.stringify({
+          ...JSON.parse(discoveryBody),
+          issuer: "https://evil.example.com",
+        }),
+      ),
+    );
+
+    await expect(
+      exchangeNativeOidcCode({
+        issuer: "https://identity.ic0.app",
+        fetchFn: fetchMock,
+        clientId: "com.example.app",
+        code: "native-code",
+        codeVerifier: "native-verifier",
+        redirectUri: "com.example.app:/oauth2redirect/ii",
+      }),
+    ).rejects.toMatchObject({
+      name: "NativeOidcError",
+      phase: "discovery",
+      code: "invalid_configuration",
+    });
+  });
+
   it("uses an explicit token endpoint without discovery", async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(tokenBody));
 
@@ -141,6 +167,23 @@ describe("nativeOidc", () => {
       "https://gateway.example/oauth2/token",
       expect.objectContaining({ method: "POST" }),
     );
+  });
+
+  it("rejects code exchange without issuer or token endpoint as invalid configuration", async () => {
+    await expect(
+      exchangeNativeOidcCode({
+        fetchFn: vi.fn(),
+        clientId: "com.example.app",
+        code: "native-code",
+        codeVerifier: "native-verifier",
+        redirectUri: "com.example.app:/oauth2redirect/ii",
+      }),
+    ).rejects.toMatchObject({
+      name: "NativeOidcError",
+      phase: "discovery",
+      code: "invalid_configuration",
+      message: "issuer is required when tokenEndpoint is missing",
+    });
   });
 
   it("fetches certified delegation and converts it to a DelegationChain", async () => {
@@ -206,6 +249,20 @@ describe("nativeOidc", () => {
     expect(
       delegationChain.delegations[0].delegation.targets?.[0].toText(),
     ).toBe("aaaaa-aa");
+  });
+
+  it("rejects delegation fetch without issuer or delegation endpoint as invalid configuration", async () => {
+    await expect(
+      fetchIcDelegation({
+        fetchFn: vi.fn(),
+        accessToken: "native-access-token",
+      }),
+    ).rejects.toMatchObject({
+      name: "NativeOidcError",
+      phase: "discovery",
+      code: "invalid_configuration",
+      message: "issuer is required when delegationEndpoint is missing",
+    });
   });
 
   it("completes the token and delegation flow in one helper call", async () => {

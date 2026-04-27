@@ -118,6 +118,33 @@ fn query_param(url: &str, name: &str) -> Option<String> {
     })
 }
 
+fn native_request_id(authorize_url: &str) -> String {
+    query_param(authorize_url, "native_request_id").expect("authorize_url should include request")
+}
+
+fn authorization_code(redirect_url: &str) -> String {
+    query_param(redirect_url, "code").expect("redirect_url should include code")
+}
+
+fn complete_request(
+    env: &pocket_ic::PocketIc,
+    canister_id: CanisterId,
+    anchor_number: u64,
+    authorize_url: &str,
+) -> Result<String, RejectResponse> {
+    let request_id = native_request_id(authorize_url);
+    let completed = api::complete_native_authorization(
+        env,
+        canister_id,
+        principal_1(),
+        anchor_number,
+        &request_id,
+        None,
+    )?
+    .expect("completion should succeed");
+    Ok(authorization_code(&completed.redirect_url))
+}
+
 #[test]
 fn should_complete_redeem_oidc_token_and_exchange_native_authorization(
 ) -> Result<(), RejectResponse> {
@@ -134,11 +161,12 @@ fn should_complete_redeem_oidc_token_and_exchange_native_authorization(
 
     let prepared = api::prepare_native_authorization(&env, canister_id, &request)?
         .expect("prepare native authorization should succeed");
+    let request_id = native_request_id(&prepared.authorize_url);
     assert_eq!(
         prepared.authorize_url,
         format!(
             "{}/authorize?native_request_id={}",
-            request.ii_origin, prepared.request_id
+            request.ii_origin, request_id
         )
     );
 
@@ -147,31 +175,53 @@ fn should_complete_redeem_oidc_token_and_exchange_native_authorization(
         canister_id,
         principal_1(),
         anchor_number,
-        &prepared.request_id,
+        &request_id,
         None,
     )?
     .expect("completion should succeed");
+    let code = authorization_code(&completed.redirect_url);
     assert_eq!(
         completed.redirect_url,
         format!(
             "{}?code={}&state={}",
-            request.redirect_uri, prepared.request_id, request.state
+            request.redirect_uri, code, request.state
         )
     );
+    assert_ne!(code, request_id);
 
     let token_response = api::redeem_native_authorization_code(
         &env,
         canister_id,
-        &redeem_request(
-            &prepared.request_id,
-            &request.redirect_uri,
-            &request.client_id,
-        ),
+        &redeem_request(&code, &request.redirect_uri, &request.client_id),
     )?
     .expect("redeem should succeed");
     assert_eq!(token_response.token_type, "Bearer");
     assert!(!token_response.access_token.is_empty());
     assert!(token_response.expires_in > 0);
+    let access_token = token_response.access_token.clone();
+
+    let completion_retry = api::complete_native_authorization(
+        &env,
+        canister_id,
+        principal_1(),
+        anchor_number,
+        &request_id,
+        None,
+    )?;
+    assert!(matches!(
+        completion_retry,
+        Err(CompleteNativeAuthorizationError::NotFound)
+    ));
+
+    let redeem_retry = api::redeem_native_authorization_code(
+        &env,
+        canister_id,
+        &redeem_request(&code, &request.redirect_uri, &request.client_id),
+    )?;
+    assert!(matches!(
+        redeem_retry,
+        Err(RedeemNativeAuthorizationCodeError::InvalidGrant(_))
+    ));
 
     let id_token_parts: Vec<_> = token_response.id_token.split('.').collect();
     assert_eq!(id_token_parts.len(), 3);
@@ -191,11 +241,13 @@ fn should_complete_redeem_oidc_token_and_exchange_native_authorization(
     let exchanged = api::exchange_native_access_token_for_delegation(
         &env,
         canister_id,
-        &ExchangeNativeAccessTokenForDelegationRequest {
-            access_token: token_response.access_token,
-        },
+        &ExchangeNativeAccessTokenForDelegationRequest { access_token },
     )?
     .expect("exchange should succeed");
+    assert_eq!(
+        exchanged.expiration,
+        exchanged.signed_delegation.delegation.expiration
+    );
     verify_delegation(
         &env,
         exchanged.user_key,
@@ -300,31 +352,29 @@ fn should_accept_loopback_redirect_uri_with_ephemeral_port() -> Result<(), Rejec
 
     let prepared = api::prepare_native_authorization(&env, canister_id, &request)?
         .expect("prepare native authorization should succeed");
+    let request_id = native_request_id(&prepared.authorize_url);
     let completed = api::complete_native_authorization(
         &env,
         canister_id,
         principal_1(),
         anchor_number,
-        &prepared.request_id,
+        &request_id,
         None,
     )?
     .expect("completion should succeed");
+    let code = authorization_code(&completed.redirect_url);
     assert_eq!(
         completed.redirect_url,
         format!(
             "{}?code={}&state={}",
-            request.redirect_uri, prepared.request_id, request.state
+            request.redirect_uri, code, request.state
         )
     );
 
     api::redeem_native_authorization_code(
         &env,
         canister_id,
-        &redeem_request(
-            &prepared.request_id,
-            &request.redirect_uri,
-            &request.client_id,
-        ),
+        &redeem_request(&code, &request.redirect_uri, &request.client_id),
     )?
     .expect("redeem should succeed");
     Ok(())
@@ -349,6 +399,29 @@ fn should_reject_loopback_redirect_uri_with_unregistered_origin() -> Result<(), 
         result,
         Err(PrepareNativeAuthorizationError::InvalidOrigin(_))
     ));
+    Ok(())
+}
+
+#[test]
+fn should_reject_ii_origin_with_path() -> Result<(), RejectResponse> {
+    let env = env();
+    let canister_id = install_native_oidc_ii(
+        &env,
+        vec![native_client_config(
+            &native_request().client_id,
+            vec![native_request().redirect_uri],
+        )],
+    );
+
+    for ii_origin in ["https://identity.test/foo", "https://identity.test//"] {
+        let mut request = native_request();
+        request.ii_origin = ii_origin.to_string();
+        let result = api::prepare_native_authorization(&env, canister_id, &request)?;
+        assert!(matches!(
+            result,
+            Err(PrepareNativeAuthorizationError::InvalidOrigin(_))
+        ));
+    }
     Ok(())
 }
 
@@ -450,18 +523,19 @@ fn should_percent_encode_state_in_redirect_url() -> Result<(), RejectResponse> {
     let anchor_number = flows::register_anchor(&env, canister_id);
     let prepared = api::prepare_native_authorization(&env, canister_id, &request)?
         .expect("prepare should succeed");
+    let request_id = native_request_id(&prepared.authorize_url);
     let completed = api::complete_native_authorization(
         &env,
         canister_id,
         principal_1(),
         anchor_number,
-        &prepared.request_id,
+        &request_id,
         None,
     )?
     .expect("completion should succeed");
     assert_eq!(
         query_param(&completed.redirect_url, "code"),
-        Some(prepared.request_id)
+        Some(authorization_code(&completed.redirect_url))
     );
     assert_eq!(
         query_param(&completed.redirect_url, "state"),
@@ -484,26 +558,14 @@ fn should_invalidate_code_after_pkce_mismatch() -> Result<(), RejectResponse> {
     let anchor_number = flows::register_anchor(&env, canister_id);
     let prepared = api::prepare_native_authorization(&env, canister_id, &request)?
         .expect("prepare should succeed");
-    api::complete_native_authorization(
-        &env,
-        canister_id,
-        principal_1(),
-        anchor_number,
-        &prepared.request_id,
-        None,
-    )?
-    .expect("completion should succeed");
+    let code = complete_request(&env, canister_id, anchor_number, &prepared.authorize_url)?;
 
     let invalid = api::redeem_native_authorization_code(
         &env,
         canister_id,
         &RedeemNativeAuthorizationCodeRequest {
             code_verifier: WRONG_PKCE_VERIFIER.to_string(),
-            ..redeem_request(
-                &prepared.request_id,
-                &request.redirect_uri,
-                &request.client_id,
-            )
+            ..redeem_request(&code, &request.redirect_uri, &request.client_id)
         },
     )?;
     assert!(matches!(
@@ -514,14 +576,40 @@ fn should_invalidate_code_after_pkce_mismatch() -> Result<(), RejectResponse> {
     let retry = api::redeem_native_authorization_code(
         &env,
         canister_id,
-        &redeem_request(
-            &prepared.request_id,
-            &request.redirect_uri,
-            &request.client_id,
-        ),
+        &redeem_request(&code, &request.redirect_uri, &request.client_id),
     )?;
     assert!(matches!(
         retry,
+        Err(RedeemNativeAuthorizationCodeError::InvalidGrant(_))
+    ));
+    Ok(())
+}
+
+#[test]
+fn should_reject_request_id_as_authorization_code() -> Result<(), RejectResponse> {
+    let env = env();
+    let request = native_request();
+    let canister_id = install_native_oidc_ii(
+        &env,
+        vec![native_client_config(
+            &request.client_id,
+            vec![request.redirect_uri.clone()],
+        )],
+    );
+    let anchor_number = flows::register_anchor(&env, canister_id);
+    let prepared = api::prepare_native_authorization(&env, canister_id, &request)?
+        .expect("prepare should succeed");
+    let request_id = native_request_id(&prepared.authorize_url);
+    let code = complete_request(&env, canister_id, anchor_number, &prepared.authorize_url)?;
+    assert_ne!(code, request_id);
+
+    let result = api::redeem_native_authorization_code(
+        &env,
+        canister_id,
+        &redeem_request(&request_id, &request.redirect_uri, &request.client_id),
+    )?;
+    assert!(matches!(
+        result,
         Err(RedeemNativeAuthorizationCodeError::InvalidGrant(_))
     ));
     Ok(())
@@ -541,26 +629,14 @@ fn should_reject_short_pkce_verifier() -> Result<(), RejectResponse> {
     let anchor_number = flows::register_anchor(&env, canister_id);
     let prepared = api::prepare_native_authorization(&env, canister_id, &request)?
         .expect("prepare should succeed");
-    api::complete_native_authorization(
-        &env,
-        canister_id,
-        principal_1(),
-        anchor_number,
-        &prepared.request_id,
-        None,
-    )?
-    .expect("completion should succeed");
+    let code = complete_request(&env, canister_id, anchor_number, &prepared.authorize_url)?;
 
     let result = api::redeem_native_authorization_code(
         &env,
         canister_id,
         &RedeemNativeAuthorizationCodeRequest {
             code_verifier: "short-verifier".to_string(),
-            ..redeem_request(
-                &prepared.request_id,
-                &request.redirect_uri,
-                &request.client_id,
-            )
+            ..redeem_request(&code, &request.redirect_uri, &request.client_id)
         },
     )?;
     assert!(matches!(
@@ -584,26 +660,14 @@ fn should_reject_too_long_pkce_verifier() -> Result<(), RejectResponse> {
     let anchor_number = flows::register_anchor(&env, canister_id);
     let prepared = api::prepare_native_authorization(&env, canister_id, &request)?
         .expect("prepare should succeed");
-    api::complete_native_authorization(
-        &env,
-        canister_id,
-        principal_1(),
-        anchor_number,
-        &prepared.request_id,
-        None,
-    )?
-    .expect("completion should succeed");
+    let code = complete_request(&env, canister_id, anchor_number, &prepared.authorize_url)?;
 
     let result = api::redeem_native_authorization_code(
         &env,
         canister_id,
         &RedeemNativeAuthorizationCodeRequest {
             code_verifier: "a".repeat(129),
-            ..redeem_request(
-                &prepared.request_id,
-                &request.redirect_uri,
-                &request.client_id,
-            )
+            ..redeem_request(&code, &request.redirect_uri, &request.client_id)
         },
     )?;
     assert!(matches!(
@@ -628,23 +692,11 @@ fn should_not_use_caller_supplied_ii_origin_for_signed_issuer() -> Result<(), Re
     let anchor_number = flows::register_anchor(&env, canister_id);
     let prepared = api::prepare_native_authorization(&env, canister_id, &request)?
         .expect("prepare should succeed");
-    api::complete_native_authorization(
-        &env,
-        canister_id,
-        principal_1(),
-        anchor_number,
-        &prepared.request_id,
-        None,
-    )?
-    .expect("completion should succeed");
+    let code = complete_request(&env, canister_id, anchor_number, &prepared.authorize_url)?;
     let token_response = api::redeem_native_authorization_code(
         &env,
         canister_id,
-        &redeem_request(
-            &prepared.request_id,
-            &request.redirect_uri,
-            &request.client_id,
-        ),
+        &redeem_request(&code, &request.redirect_uri, &request.client_id),
     )?
     .expect("redeem should succeed");
     let claims: IdTokenClaims = serde_json::from_slice(
@@ -682,23 +734,11 @@ fn should_use_configured_issuer_for_signed_tokens() -> Result<(), RejectResponse
     let anchor_number = flows::register_anchor(&env, canister_id);
     let prepared = api::prepare_native_authorization(&env, canister_id, &request)?
         .expect("prepare should succeed");
-    api::complete_native_authorization(
-        &env,
-        canister_id,
-        principal_1(),
-        anchor_number,
-        &prepared.request_id,
-        None,
-    )?
-    .expect("completion should succeed");
+    let code = complete_request(&env, canister_id, anchor_number, &prepared.authorize_url)?;
     let token_response = api::redeem_native_authorization_code(
         &env,
         canister_id,
-        &redeem_request(
-            &prepared.request_id,
-            &request.redirect_uri,
-            &request.client_id,
-        ),
+        &redeem_request(&code, &request.redirect_uri, &request.client_id),
     )?
     .expect("redeem should succeed");
     let claims: IdTokenClaims = serde_json::from_slice(
@@ -733,34 +773,18 @@ fn should_reject_second_redeem() -> Result<(), RejectResponse> {
     let anchor_number = flows::register_anchor(&env, canister_id);
     let prepared = api::prepare_native_authorization(&env, canister_id, &request)?
         .expect("prepare should succeed");
-    api::complete_native_authorization(
-        &env,
-        canister_id,
-        principal_1(),
-        anchor_number,
-        &prepared.request_id,
-        None,
-    )?
-    .expect("completion should succeed");
+    let code = complete_request(&env, canister_id, anchor_number, &prepared.authorize_url)?;
 
     api::redeem_native_authorization_code(
         &env,
         canister_id,
-        &redeem_request(
-            &prepared.request_id,
-            &request.redirect_uri,
-            &request.client_id,
-        ),
+        &redeem_request(&code, &request.redirect_uri, &request.client_id),
     )?
     .expect("first redeem should succeed");
     let second = api::redeem_native_authorization_code(
         &env,
         canister_id,
-        &redeem_request(
-            &prepared.request_id,
-            &request.redirect_uri,
-            &request.client_id,
-        ),
+        &redeem_request(&code, &request.redirect_uri, &request.client_id),
     )?;
     assert!(matches!(
         second,
@@ -783,23 +807,11 @@ fn should_return_expired_for_expired_access_token() -> Result<(), RejectResponse
     let anchor_number = flows::register_anchor(&env, canister_id);
     let prepared = api::prepare_native_authorization(&env, canister_id, &request)?
         .expect("prepare should succeed");
-    api::complete_native_authorization(
-        &env,
-        canister_id,
-        principal_1(),
-        anchor_number,
-        &prepared.request_id,
-        None,
-    )?
-    .expect("completion should succeed");
+    let code = complete_request(&env, canister_id, anchor_number, &prepared.authorize_url)?;
     let token_response = api::redeem_native_authorization_code(
         &env,
         canister_id,
-        &redeem_request(
-            &prepared.request_id,
-            &request.redirect_uri,
-            &request.client_id,
-        ),
+        &redeem_request(&code, &request.redirect_uri, &request.client_id),
     )?
     .expect("redeem should succeed");
 
@@ -859,26 +871,14 @@ fn should_expire_authorization_code_before_redeem() -> Result<(), RejectResponse
     let anchor_number = flows::register_anchor(&env, canister_id);
     let prepared = api::prepare_native_authorization(&env, canister_id, &request)?
         .expect("prepare should succeed");
-    api::complete_native_authorization(
-        &env,
-        canister_id,
-        principal_1(),
-        anchor_number,
-        &prepared.request_id,
-        None,
-    )?
-    .expect("completion should succeed");
+    let code = complete_request(&env, canister_id, anchor_number, &prepared.authorize_url)?;
     env.advance_time(Duration::from_secs(NATIVE_REQUEST_TTL_SECS + 1));
     env.tick();
 
     let result = api::redeem_native_authorization_code(
         &env,
         canister_id,
-        &redeem_request(
-            &prepared.request_id,
-            &request.redirect_uri,
-            &request.client_id,
-        ),
+        &redeem_request(&code, &request.redirect_uri, &request.client_id),
     )?;
     assert!(matches!(
         result,

@@ -8,11 +8,14 @@ II native browser authorization now follows a discovery-first OAuth-style split 
 3. Native app prepares the II native authorization request and opens the discovered
    authorization endpoint URL in a browser.
 4. II completes user authentication on `/authorize`.
-5. II redirects to `redirect_uri?code=<request_id>&state=<state>`.
+5. II redirects to `redirect_uri?code=<authorization_code>&state=<state>`.
 6. Native app redeems the code at the discovered `token_endpoint`.
 7. II returns a short-lived II-native `access_token`, `token_type`, `expires_in`, and `id_token`.
 8. Native app fetches the IC delegation from the discovered `ic_delegation_endpoint`.
 9. II returns the regular IC delegation (`user_key` and `signed_delegation`).
+
+Successful code redemption consumes the prepared authorization request and authorization code
+records. Completed logins do not occupy request or code capacity until TTL expiry.
 
 ## DX Model
 
@@ -101,6 +104,7 @@ const { delegationChain } = await fetchIcDelegation({
   - Helper reads discovery.
   - `authorization_endpoint`, `token_endpoint`, and `ic_delegation_endpoint` come from the
     discovery document.
+  - The returned `issuer` must exactly match the requested issuer.
 - `tokenEndpoint` only
   - `exchangeNativeOidcCode(...)` can use it directly.
 - `delegationEndpoint` only
@@ -108,10 +112,13 @@ const { delegationChain } = await fetchIcDelegation({
 - `completeNativeOidcLogin(...)`
   - Must receive `issuer`, or both explicit endpoints.
   - Partial endpoint override is rejected as invalid configuration.
+  - Throws `NativeOidcError` with `code = "invalid_configuration"` on bad input.
 
 ## Error Contract
 
 - Helper failures throw `NativeOidcError`.
+- This includes invalid local configuration for `exchangeNativeOidcCode(...)`,
+  `fetchIcDelegation(...)`, and `completeNativeOidcLogin(...)`.
 - Stable fields:
   - `phase`
     - `discovery`
@@ -150,8 +157,11 @@ Prefer the header transport and avoid copying or persisting legacy request URLs.
   still rely on URL-based delegation exchange. New integrations should treat it as deprecated and
   use the `Authorization` header transport instead.
 - `prepare_native_authorization` is anonymously callable and currently uses only global capacity
-  limits for pending requests and exchange tokens. This keeps the first version simple, but it does
-  not yet provide per-client, per-origin, or caller-scoped abuse controls.
+  limits for pending requests and exchange tokens. Successful token redemption releases request and
+  authorization-code capacity, but the flow does not yet provide per-client, per-origin, or
+  caller-scoped abuse controls.
+- Access-token exchange stays on a query path for low-latency delegation retrieval. Native access
+  tokens are short-lived bearer exchange tokens and can be reused until expiry.
 - `id_token.sub` is pairwise per `client_id`, but it is still derived under the configured issuer.
   Operators that change the issuer origin should expect subject rotation and plan migrations
   accordingly.
@@ -183,6 +193,10 @@ so native apps can use an ephemeral port per authorization request.
 
 - `client_id`
 - `redirect_uri`
+- `ii_origin`
+  - Must be an HTTPS origin.
+  - Optional trailing slash is accepted.
+  - Paths other than `/`, query, and fragment are rejected.
 - `state`
 - `scope` including `openid`
   - Represented as repeated Candid strings rather than as a single space-delimited OAuth `scope`
