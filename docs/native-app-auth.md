@@ -1,6 +1,7 @@
 # Native Browser Authorization
 
-II native browser authorization now follows a discovery-first OAuth-style split flow:
+II native browser authorization is compatible with the OIDC authorization request shape and adds
+IC delegation extension parameters:
 
 1. Native app reads `/.well-known/openid-configuration`.
 2. II returns `authorization_endpoint`, `token_endpoint`, and the IC extension
@@ -14,7 +15,7 @@ II native browser authorization now follows a discovery-first OAuth-style split 
 8. Native app fetches the IC delegation from the discovered `ic_delegation_endpoint`.
 9. II returns the regular IC delegation (`user_key` and `signed_delegation`).
 
-Successful code redemption consumes the prepared authorization request and authorization code
+Successful code redemption consumes the pending authorization request and authorization code
 records. Completed logins do not occupy request or code capacity until TTL expiry.
 
 ## DX Model
@@ -227,8 +228,11 @@ II native delegation adds IC extension parameters:
 - `ic_origin`
   - HTTPS origin bound to the issued IC delegation.
   - Must be registered in the native client `allowed_origins`.
+  - Required because IC delegation validity is bound to an origin that is separate from the native
+    app redirect URI.
 - `ic_session_public_key`
   - Base64url-encoded session public key for the IC delegation.
+  - Required because the issued delegation must authorize the native app's local session key.
 - `ic_max_time_to_live`
   - Optional TTL in nanoseconds.
 

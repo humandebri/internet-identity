@@ -172,28 +172,7 @@ type GetDelegationResponse = variant {
     no_such_delegation;
 };
 
-type PrepareNativeAuthorizationRequest = record {
-    origin : FrontendHostname;
-    ii_origin : text;
-    session_public_key : SessionKey;
-    redirect_uri : text;
-    client_id : text;
-    state : text;
-    scope : vec text;
-    nonce : text;
-    code_challenge : text;
-    code_challenge_method : text;
-    response_type : text;
-    response_mode : text;
-    max_time_to_live : opt nat64;
-};
-
-type PrepareNativeAuthorizationResponse = record {
-    authorize_url : text;
-    expires_at : Timestamp;
-};
-
-type StartNativeAuthorizationRequest = record {
+type RegisterNativeAuthorizationRequest = record {
     origin : FrontendHostname;
     session_public_key : SessionKey;
     redirect_uri : text;
@@ -207,20 +186,9 @@ type StartNativeAuthorizationRequest = record {
     max_time_to_live : opt nat64;
 };
 
-type StartNativeAuthorizationResponse = record {
+type RegisterNativeAuthorizationResponse = record {
     request_id : text;
     expires_at : Timestamp;
-};
-
-type NativeAuthorizationRequest = record {
-    origin : FrontendHostname;
-    redirect_uri : text;
-    client_id : text;
-    state : text;
-    scope : vec text;
-    nonce : text;
-    session_public_key : SessionKey;
-    max_time_to_live : opt nat64;
 };
 
 type CompleteNativeAuthorizationResponse = record {
@@ -258,12 +226,6 @@ type PrepareNativeAuthorizationError = variant {
     invalid_request : text;
     too_many_requests;
     internal_canister_error : text;
-};
-
-type GetNativeAuthorizationRequestError = variant {
-    not_found;
-    expired;
-    already_completed;
 };
 
 type CompleteNativeAuthorizationError = variant {
@@ -1282,9 +1244,7 @@ service : (opt InternetIdentityInit) -> {
     // =======================
     prepare_delegation : (UserNumber, FrontendHostname, SessionKey, maxTimeToLive : opt nat64) -> (UserKey, Timestamp);
     get_delegation : (UserNumber, FrontendHostname, SessionKey, Timestamp) -> (GetDelegationResponse) query;
-    prepare_native_authorization : (PrepareNativeAuthorizationRequest) -> (variant { Ok : PrepareNativeAuthorizationResponse; Err : PrepareNativeAuthorizationError });
-    start_native_authorization : (StartNativeAuthorizationRequest) -> (variant { Ok : StartNativeAuthorizationResponse; Err : PrepareNativeAuthorizationError });
-    get_native_authorization_request : (request_id : text) -> (variant { Ok : NativeAuthorizationRequest; Err : GetNativeAuthorizationRequestError }) query;
+    register_native_authorization_request : (RegisterNativeAuthorizationRequest) -> (variant { Ok : RegisterNativeAuthorizationResponse; Err : PrepareNativeAuthorizationError });
     complete_native_authorization : (
         anchor_number : UserNumber,
         request_id : text,

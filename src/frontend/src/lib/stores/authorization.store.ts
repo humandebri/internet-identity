@@ -40,7 +40,6 @@ type AuthorizationStore = Readable<AuthorizationContext | undefined> & {
     requestId: string | number,
     params: DelegationParams,
   ) => Promise<void>;
-  handleNativeRequest: (requestId: string) => Promise<void>;
   handleNativeOidcAuthorizeRequest: (params: URLSearchParams) => Promise<void>;
   authorize: (
     accountNumber: Promise<bigint | undefined> | bigint | undefined,
@@ -76,28 +75,10 @@ export const authorizationStore: AuthorizationStore = {
       isAuthenticating: false,
     });
   },
-  handleNativeRequest: async (requestId) => {
-    const { origin, session_public_key, max_time_to_live } =
-      await anonymousActor
-        .get_native_authorization_request(requestId)
-        .then(throwCanisterError);
-    internalStore.set({
-      kind: "native",
-      authRequest: {
-        kind: "authorize-client",
-        sessionPublicKey: new Uint8Array(session_public_key),
-        maxTimeToLive: max_time_to_live[0],
-      },
-      requestId,
-      requestOrigin: origin,
-      effectiveOrigin: origin,
-      isAuthenticating: false,
-    });
-  },
   handleNativeOidcAuthorizeRequest: async (params) => {
     const request = nativeOidcAuthorizeRequest(params);
     const { request_id } = await anonymousActor
-      .start_native_authorization(request)
+      .register_native_authorization_request(request)
       .then(throwCanisterError);
     internalStore.set({
       kind: "native",

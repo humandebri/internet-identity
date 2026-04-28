@@ -48,9 +48,7 @@
     typeof window === "undefined"
       ? new URLSearchParams()
       : new URL(window.location.href).searchParams;
-  const nativeRequestId = authorizeParams.get("native_request_id");
   const isNativeOidcAuthorizeRequest =
-    nativeRequestId === null &&
     authorizeParams.get("response_type") === "code" &&
     authorizeParams.has("client_id");
 
@@ -102,26 +100,6 @@
       });
     });
 
-  const authorizeNativeRequest = async (requestId: string): Promise<void> => {
-    try {
-      await authorizationStore.handleNativeRequest(requestId);
-    } catch (error) {
-      if (isCanisterError(error)) {
-        if (
-          error.type === "expired" ||
-          error.type === "not_found" ||
-          error.type === "already_completed"
-        ) {
-          throw new AuthorizeChannelError(
-            $t`Invalid request`,
-            $t`It seems like an invalid authentication request was received.`,
-          );
-        }
-      }
-      throw error;
-    }
-  };
-
   const authorizeNativeOidcRequest = async (): Promise<void> => {
     try {
       await authorizationStore.handleNativeOidcAuthorizeRequest(authorizeParams);
@@ -153,9 +131,7 @@
   };
 
   let authorizePromise = $state(
-    nativeRequestId !== null
-      ? authorizeNativeRequest(nativeRequestId)
-      : isNativeOidcAuthorizeRequest
+    isNativeOidcAuthorizeRequest
         ? authorizeNativeOidcRequest()
       : channelStore
           .establish(options)

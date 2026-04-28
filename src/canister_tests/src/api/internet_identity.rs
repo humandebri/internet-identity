@@ -117,55 +117,20 @@ pub fn get_delegation(
     .map(|(x,)| x)
 }
 
-pub fn prepare_native_authorization(
+pub fn register_native_authorization_request(
     env: &PocketIc,
     canister_id: CanisterId,
-    request: &types::PrepareNativeAuthorizationRequest,
+    request: &types::RegisterNativeAuthorizationRequest,
 ) -> Result<
-    Result<types::PrepareNativeAuthorizationResponse, types::PrepareNativeAuthorizationError>,
+    Result<types::RegisterNativeAuthorizationResponse, types::PrepareNativeAuthorizationError>,
     RejectResponse,
 > {
     call_candid(
         env,
         canister_id,
         RawEffectivePrincipal::None,
-        "prepare_native_authorization",
+        "register_native_authorization_request",
         (request,),
-    )
-    .map(|(x,)| x)
-}
-
-pub fn start_native_authorization(
-    env: &PocketIc,
-    canister_id: CanisterId,
-    request: &types::StartNativeAuthorizationRequest,
-) -> Result<
-    Result<types::StartNativeAuthorizationResponse, types::PrepareNativeAuthorizationError>,
-    RejectResponse,
-> {
-    call_candid(
-        env,
-        canister_id,
-        RawEffectivePrincipal::None,
-        "start_native_authorization",
-        (request,),
-    )
-    .map(|(x,)| x)
-}
-
-pub fn get_native_authorization_request(
-    env: &PocketIc,
-    canister_id: CanisterId,
-    request_id: &str,
-) -> Result<
-    Result<types::NativeAuthorizationRequest, types::GetNativeAuthorizationRequestError>,
-    RejectResponse,
-> {
-    query_candid(
-        env,
-        canister_id,
-        "get_native_authorization_request",
-        (request_id,),
     )
     .map(|(x,)| x)
 }

@@ -13,13 +13,11 @@ use ic_cdk::api::time;
 use internet_identity_interface::internet_identity::types::{
     CompleteNativeAuthorizationError, CompleteNativeAuthorizationResponse,
     ExchangeNativeAccessTokenForDelegationError, ExchangeNativeAccessTokenForDelegationRequest,
-    ExchangeNativeAccessTokenForDelegationResponse, GetNativeAuthorizationRequestError,
-    NativeAuthorizationRequest, NativeOidcApplicationType, NativeOidcClientConfig,
-    NativeOidcTokenEndpointAuthMethod, PrepareNativeAuthorizationError,
-    PrepareNativeAuthorizationRequest, PrepareNativeAuthorizationResponse,
+    ExchangeNativeAccessTokenForDelegationResponse, NativeOidcApplicationType,
+    NativeOidcClientConfig, NativeOidcTokenEndpointAuthMethod, PrepareNativeAuthorizationError,
     RedeemNativeAuthorizationCodeError, RedeemNativeAuthorizationCodeRequest,
-    RedeemNativeAuthorizationCodeResponse, SessionKey, StartNativeAuthorizationRequest,
-    StartNativeAuthorizationResponse, Timestamp,
+    RedeemNativeAuthorizationCodeResponse, RegisterNativeAuthorizationRequest,
+    RegisterNativeAuthorizationResponse, SessionKey, Timestamp,
 };
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
@@ -34,7 +32,6 @@ use std::collections::BTreeSet;
 
 const REQUEST_ID_NUM_BYTES: usize = 32;
 const TOKEN_NUM_BYTES: usize = 32;
-const HTTPS_URL_MAX_BYTES: usize = 512;
 const LOOPBACK_URL_MAX_BYTES: usize = 512;
 const ORIGIN_MAX_BYTES: usize = 255;
 const STATE_MAX_BYTES: usize = 512;
@@ -138,36 +135,9 @@ struct NativeAuthorizationInput {
     max_time_to_live: Option<u64>,
 }
 
-pub async fn prepare(
-    request: PrepareNativeAuthorizationRequest,
-) -> Result<PrepareNativeAuthorizationResponse, PrepareNativeAuthorizationError> {
-    let ii_origin = canonicalize_ii_origin(&request.ii_origin)
-        .map_err(PrepareNativeAuthorizationError::InvalidOrigin)?;
-    let (request_id, expires_at) = insert_native_authorization(NativeAuthorizationInput {
-        origin: request.origin,
-        session_public_key: request.session_public_key,
-        redirect_uri: request.redirect_uri,
-        client_id: request.client_id,
-        state: request.state,
-        scope: request.scope,
-        nonce: request.nonce,
-        code_challenge: request.code_challenge,
-        code_challenge_method: request.code_challenge_method,
-        response_type: request.response_type,
-        response_mode: request.response_mode,
-        max_time_to_live: request.max_time_to_live,
-    })
-    .await?;
-
-    Ok(PrepareNativeAuthorizationResponse {
-        authorize_url: format!("{ii_origin}/authorize?native_request_id={request_id}"),
-        expires_at,
-    })
-}
-
-pub async fn start(
-    request: StartNativeAuthorizationRequest,
-) -> Result<StartNativeAuthorizationResponse, PrepareNativeAuthorizationError> {
+pub async fn register(
+    request: RegisterNativeAuthorizationRequest,
+) -> Result<RegisterNativeAuthorizationResponse, PrepareNativeAuthorizationError> {
     let scope = parse_authorization_scope(&request.scope)
         .map_err(PrepareNativeAuthorizationError::InvalidRequest)?;
     let (request_id, expires_at) = insert_native_authorization(NativeAuthorizationInput {
@@ -186,39 +156,10 @@ pub async fn start(
     })
     .await?;
 
-    Ok(StartNativeAuthorizationResponse {
+    Ok(RegisterNativeAuthorizationResponse {
         request_id,
         expires_at,
     })
-}
-
-pub fn get_request(
-    request_id: &str,
-) -> Result<NativeAuthorizationRequest, GetNativeAuthorizationRequestError> {
-    let now = time();
-    let Some(record) = state::native_authorizations(|native_authorizations| {
-        native_authorizations.get(request_id).cloned()
-    }) else {
-        return Err(GetNativeAuthorizationRequestError::NotFound);
-    };
-    if record.expires_at <= now {
-        return Err(GetNativeAuthorizationRequestError::Expired);
-    }
-    match record.status {
-        NativeAuthorizationStatus::Pending => Ok(NativeAuthorizationRequest {
-            origin: record.origin,
-            redirect_uri: record.redirect_uri,
-            client_id: record.client_id,
-            state: record.state,
-            scope: record.scope,
-            nonce: record.nonce,
-            session_public_key: record.session_public_key,
-            max_time_to_live: record.max_time_to_live,
-        }),
-        NativeAuthorizationStatus::InProgress(_) | NativeAuthorizationStatus::Authorized(_) => {
-            Err(GetNativeAuthorizationRequestError::AlreadyCompleted)
-        }
-    }
 }
 
 pub async fn complete(
@@ -470,7 +411,6 @@ async fn insert_native_authorization(
         redirect_uri: input.redirect_uri,
         client_id: input.client_id,
         state: input.state,
-        scope: input.scope,
         nonce: input.nonce,
         code_challenge: input.code_challenge,
         code_challenge_method: input.code_challenge_method,
@@ -820,25 +760,6 @@ fn is_reverse_domain_scheme(scheme: &str) -> bool {
                     .iter()
                     .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'-')
         })
-}
-
-fn canonicalize_ii_origin(ii_origin: &str) -> Result<String, String> {
-    if ii_origin.is_empty() {
-        return Err("ii origin must not be empty".to_string());
-    }
-    if ii_origin.len() > HTTPS_URL_MAX_BYTES {
-        return Err(format!(
-            "ii origin must not exceed {HTTPS_URL_MAX_BYTES} bytes"
-        ));
-    }
-    if ii_origin.bytes().any(|byte| byte <= b' ') {
-        return Err("ii origin must not contain control characters".to_string());
-    }
-    let trimmed = ii_origin.strip_suffix('/').unwrap_or(ii_origin);
-    if trimmed.ends_with('/') {
-        return Err("ii origin must not contain a path".to_string());
-    }
-    canonicalize_native_origin_string(trimmed).map_err(|err| format!("ii origin {err}"))
 }
 
 fn canonicalize_native_origin_string(origin: &str) -> Result<String, String> {
@@ -1196,16 +1117,6 @@ mod tests {
         assert!(validate_issuer_origin("https://identity.ic0.app:443").is_ok());
         assert!(validate_issuer_origin("https://identity.ic0.app/").is_err());
         assert!(validate_issuer_origin("https://identity.ic0.app/path").is_err());
-    }
-
-    #[test]
-    fn should_canonicalize_ii_origin_with_optional_trailing_slash() {
-        assert_eq!(
-            canonicalize_ii_origin("https://identity.ic0.app/").unwrap(),
-            "https://identity.ic0.app"
-        );
-        assert!(canonicalize_ii_origin("https://identity.ic0.app//").is_err());
-        assert!(canonicalize_ii_origin("https://identity.ic0.app/path").is_err());
     }
 
     #[test]

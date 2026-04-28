@@ -20,7 +20,7 @@ use internet_identity_interface::internet_identity::types::{
     AuthnMethod, AuthnMethodData, CaptchaConfig, CaptchaTrigger, ChallengeAttempt, DeviceData,
     FrontendHostname, InternetIdentityInit, InternetIdentitySynchronizedConfig, MetadataEntryV2,
     NativeOidcApplicationType, NativeOidcClientConfig, NativeOidcTokenEndpointAuthMethod,
-    OpenIdConfig, StartNativeAuthorizationRequest,
+    OpenIdConfig, RegisterNativeAuthorizationRequest,
 };
 use pocket_ic::{PocketIc, RejectResponse};
 use serde_bytes::ByteBuf;
@@ -1028,10 +1028,10 @@ fn ii_canister_serves_native_oidc_token_and_delegation_http_endpoints() -> Resul
     api::init_salt(&env, canister_id)?;
     let anchor_number = flows::register_anchor(&env, canister_id);
 
-    let started = api::start_native_authorization(
+    let started = api::register_native_authorization_request(
         &env,
         canister_id,
-        &StartNativeAuthorizationRequest {
+        &RegisterNativeAuthorizationRequest {
             origin: "https://app.example.com".to_string(),
             session_public_key: ByteBuf::from(b"native session key".to_vec()),
             redirect_uri: redirect_uri.to_string(),

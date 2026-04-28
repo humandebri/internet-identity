@@ -149,30 +149,7 @@ pub enum GetDelegationResponse {
 }
 
 #[derive(Clone, Debug, CandidType, Deserialize)]
-pub struct PrepareNativeAuthorizationRequest {
-    pub origin: FrontendHostname,
-    pub ii_origin: String,
-    pub session_public_key: SessionKey,
-    pub redirect_uri: String,
-    pub client_id: String,
-    pub state: String,
-    pub scope: Vec<String>,
-    pub nonce: String,
-    pub code_challenge: String,
-    pub code_challenge_method: String,
-    pub response_type: String,
-    pub response_mode: String,
-    pub max_time_to_live: Option<u64>,
-}
-
-#[derive(Clone, Debug, CandidType, Deserialize)]
-pub struct PrepareNativeAuthorizationResponse {
-    pub authorize_url: String,
-    pub expires_at: Timestamp,
-}
-
-#[derive(Clone, Debug, CandidType, Deserialize)]
-pub struct StartNativeAuthorizationRequest {
+pub struct RegisterNativeAuthorizationRequest {
     pub origin: FrontendHostname,
     pub session_public_key: SessionKey,
     pub redirect_uri: String,
@@ -187,21 +164,9 @@ pub struct StartNativeAuthorizationRequest {
 }
 
 #[derive(Clone, Debug, CandidType, Deserialize)]
-pub struct StartNativeAuthorizationResponse {
+pub struct RegisterNativeAuthorizationResponse {
     pub request_id: String,
     pub expires_at: Timestamp,
-}
-
-#[derive(Clone, Debug, CandidType, Deserialize)]
-pub struct NativeAuthorizationRequest {
-    pub origin: FrontendHostname,
-    pub redirect_uri: String,
-    pub client_id: String,
-    pub state: String,
-    pub scope: Vec<String>,
-    pub nonce: String,
-    pub session_public_key: SessionKey,
-    pub max_time_to_live: Option<u64>,
 }
 
 #[derive(Clone, Debug, CandidType, Deserialize)]
@@ -250,16 +215,6 @@ pub enum PrepareNativeAuthorizationError {
     TooManyRequests,
     #[serde(rename = "internal_canister_error")]
     InternalCanisterError(String),
-}
-
-#[derive(Clone, Debug, CandidType, Deserialize)]
-pub enum GetNativeAuthorizationRequestError {
-    #[serde(rename = "not_found")]
-    NotFound,
-    #[serde(rename = "expired")]
-    Expired,
-    #[serde(rename = "already_completed")]
-    AlreadyCompleted,
 }
 
 #[derive(Clone, Debug, CandidType, Deserialize)]

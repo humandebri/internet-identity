@@ -475,6 +475,18 @@ export interface DummyAuthConfig {
    */
   'prompt_for_index' : boolean,
 }
+export type ExchangeNativeAccessTokenForDelegationError = { 'expired' : null } |
+  { 'internal_canister_error' : string } |
+  { 'not_found' : null } |
+  { 'invalid_token' : string };
+export interface ExchangeNativeAccessTokenForDelegationRequest {
+  'access_token' : string,
+}
+export interface ExchangeNativeAccessTokenForDelegationResponse {
+  'user_key' : UserKey,
+  'signed_delegation' : SignedDelegation,
+  'expiration' : Timestamp,
+}
 export type FrontendHostname = string;
 export type GetAccountError = {
     'NoSuchOrigin' : { 'anchor_number' : UserNumber }
@@ -586,9 +598,6 @@ export interface GetIdAliasRequest {
   'relying_party' : FrontendHostname,
   'identity_number' : IdentityNumber,
 }
-export type GetNativeAuthorizationRequestError = { 'expired' : null } |
-  { 'not_found' : null } |
-  { 'already_completed' : null };
 export type HeaderField = [string, string];
 export interface HttpRequest {
   'url' : string,
@@ -773,6 +782,10 @@ export type IdentityPropertiesReplaceError = {
  */
 export interface InternetIdentityInit {
   /**
+   * Trusted issuer origin used by native OIDC discovery and signed tokens
+   */
+  'native_oidc_issuer_origin' : [] | [string],
+  /**
    * Configuration to set the canister as production mode.
    * For now, this is used only to show or hide the banner.
    */
@@ -824,10 +837,6 @@ export interface InternetIdentityInit {
    * Configurations for native OIDC clients
    */
   'native_oidc_clients' : [] | [Array<NativeOidcClientConfig>],
-  /**
-   * Trusted issuer origin used by native OIDC discovery and signed tokens
-   */
-  'native_oidc_issuer_origin' : [] | [string],
   /**
    * Backend origin, needed to sync configuration with frontend.
    */
@@ -915,37 +924,16 @@ export type MetadataMapV2 = Array<
       { 'Bytes' : Uint8Array | number[] },
   ]
 >;
-export interface NativeAuthorizationRequest {
-  'redirect_uri' : string,
+export type NativeOidcApplicationType = { 'native' : null };
+export interface NativeOidcClientConfig {
+  'redirect_uris' : Array<string>,
+  'allowed_origins' : Array<string>,
+  'token_endpoint_auth_method' : NativeOidcTokenEndpointAuthMethod,
+  'require_pkce' : boolean,
   'client_id' : string,
-  'state' : string,
-  'scope' : Array<string>,
-  'nonce' : string,
-  'origin' : FrontendHostname,
-  'max_time_to_live' : [] | [bigint],
-  'session_public_key' : SessionKey,
+  'application_type' : NativeOidcApplicationType,
 }
-export interface RedeemNativeAuthorizationCodeRequest {
-  'grant_type' : string,
-  'code' : string,
-  'redirect_uri' : string,
-  'code_verifier' : string,
-  'client_id' : string,
-}
-export interface RedeemNativeAuthorizationCodeResponse {
-  'access_token' : string,
-  'token_type' : string,
-  'expires_in' : bigint,
-  'id_token' : string,
-}
-export interface ExchangeNativeAccessTokenForDelegationRequest {
-  'access_token' : string,
-}
-export interface ExchangeNativeAccessTokenForDelegationResponse {
-  'user_key' : UserKey,
-  'signed_delegation' : SignedDelegation,
-  'expiration' : Timestamp,
-}
+export type NativeOidcTokenEndpointAuthMethod = { 'none' : null };
 export interface OpenIDRegFinishArg {
   'jwt' : JWT,
   'name' : string,
@@ -962,16 +950,6 @@ export interface OpenIdConfig {
   'auth_scope' : Array<string>,
   'client_id' : string,
 }
-export type NativeOidcApplicationType = { 'native' : null };
-export interface NativeOidcClientConfig {
-  'client_id' : string,
-  'redirect_uris' : Array<string>,
-  'allowed_origins' : Array<string>,
-  'application_type' : NativeOidcApplicationType,
-  'token_endpoint_auth_method' : NativeOidcTokenEndpointAuthMethod,
-  'require_pkce' : boolean,
-}
-export type NativeOidcTokenEndpointAuthMethod = { 'none' : null };
 export interface OpenIdCredential {
   'aud' : Aud,
   'iss' : Iss,
@@ -1096,58 +1074,10 @@ export interface PrepareIdAliasRequest {
 export type PrepareNativeAuthorizationError = {
     'internal_canister_error' : string
   } |
-  { 'invalid_request' : string } |
   { 'too_many_requests' : null } |
   { 'invalid_redirect_uri' : string } |
-  { 'invalid_origin' : string };
-export interface PrepareNativeAuthorizationRequest {
-  'client_id' : string,
-  'scope' : Array<string>,
-  'nonce' : string,
-  'code_challenge_method' : string,
-  'state' : string,
-  'redirect_uri' : string,
-  'response_type' : string,
-  'response_mode' : string,
-  'ii_origin' : string,
-  'origin' : FrontendHostname,
-  'code_challenge' : string,
-  'max_time_to_live' : [] | [bigint],
-  'session_public_key' : SessionKey,
-}
-export interface PrepareNativeAuthorizationResponse {
-  'authorize_url' : string,
-  'expires_at' : Timestamp,
-}
-export interface StartNativeAuthorizationRequest {
-  'client_id' : string,
-  'scope' : string,
-  'nonce' : string,
-  'code_challenge_method' : string,
-  'state' : string,
-  'redirect_uri' : string,
-  'response_type' : string,
-  'origin' : FrontendHostname,
-  'code_challenge' : string,
-  'max_time_to_live' : [] | [bigint],
-  'session_public_key' : SessionKey,
-}
-export interface StartNativeAuthorizationResponse {
-  'request_id' : string,
-  'expires_at' : Timestamp,
-}
-export type RedeemNativeAuthorizationCodeError = {
-    'invalid_grant' : string
-  } |
-  { 'invalid_request' : string } |
-  { 'unsupported_grant_type' : string } |
-  { 'internal_canister_error' : string };
-export type ExchangeNativeAccessTokenForDelegationError = {
-    'invalid_token' : string
-  } |
-  { 'expired' : null } |
-  { 'not_found' : null } |
-  { 'internal_canister_error' : string };
+  { 'invalid_origin' : string } |
+  { 'invalid_request' : string };
 /**
  * The prepared id alias contains two (still unsigned) credentials in JWT format,
  * certifying the id alias for the issuer resp. the relying party.
@@ -1179,6 +1109,42 @@ export interface RateLimitConfig {
    * Time it takes (in ns) for a rate limiting token to be replenished.
    */
   'time_per_token_ns' : bigint,
+}
+export type RedeemNativeAuthorizationCodeError = {
+    'internal_canister_error' : string
+  } |
+  { 'unsupported_grant_type' : string } |
+  { 'invalid_grant' : string } |
+  { 'invalid_request' : string };
+export interface RedeemNativeAuthorizationCodeRequest {
+  'code_verifier' : string,
+  'grant_type' : string,
+  'redirect_uri' : string,
+  'code' : string,
+  'client_id' : string,
+}
+export interface RedeemNativeAuthorizationCodeResponse {
+  'id_token' : string,
+  'access_token' : string,
+  'expires_in' : bigint,
+  'token_type' : string,
+}
+export interface RegisterNativeAuthorizationRequest {
+  'response_type' : string,
+  'redirect_uri' : string,
+  'code_challenge_method' : string,
+  'origin' : FrontendHostname,
+  'scope' : string,
+  'state' : string,
+  'max_time_to_live' : [] | [bigint],
+  'code_challenge' : string,
+  'nonce' : string,
+  'session_public_key' : SessionKey,
+  'client_id' : string,
+}
+export interface RegisterNativeAuthorizationResponse {
+  'request_id' : string,
+  'expires_at' : Timestamp,
 }
 export type RegisterResponse = {
     /**
@@ -1423,16 +1389,6 @@ export interface _SERVICE {
     { 'Ok' : CompleteNativeAuthorizationResponse } |
       { 'Err' : CompleteNativeAuthorizationError }
   >,
-  'redeem_native_authorization_code' : ActorMethod<
-    [RedeemNativeAuthorizationCodeRequest],
-    { 'Ok' : RedeemNativeAuthorizationCodeResponse } |
-      { 'Err' : RedeemNativeAuthorizationCodeError }
-  >,
-  'exchange_native_access_token_for_delegation' : ActorMethod<
-    [ExchangeNativeAccessTokenForDelegationRequest],
-    { 'Ok' : ExchangeNativeAccessTokenForDelegationResponse } |
-      { 'Err' : ExchangeNativeAccessTokenForDelegationError }
-  >,
   'config' : ActorMethod<[], InternetIdentityInit>,
   'create_account' : ActorMethod<
     [UserNumber, FrontendHostname, string],
@@ -1446,6 +1402,11 @@ export interface _SERVICE {
   'create_challenge' : ActorMethod<[], Challenge>,
   'deploy_archive' : ActorMethod<[Uint8Array | number[]], DeployArchiveResult>,
   'enter_device_registration_mode' : ActorMethod<[UserNumber], Timestamp>,
+  'exchange_native_access_token_for_delegation' : ActorMethod<
+    [ExchangeNativeAccessTokenForDelegationRequest],
+    { 'Ok' : ExchangeNativeAccessTokenForDelegationResponse } |
+      { 'Err' : ExchangeNativeAccessTokenForDelegationError }
+  >,
   'exit_device_registration_mode' : ActorMethod<[UserNumber], undefined>,
   /**
    * Returns a batch of entries _sorted by sequence number_ to be archived.
@@ -1491,11 +1452,6 @@ export interface _SERVICE {
     [GetIdAliasRequest],
     { 'Ok' : IdAliasCredentials } |
       { 'Err' : GetIdAliasError }
-  >,
-  'get_native_authorization_request' : ActorMethod<
-    [string],
-    { 'Ok' : NativeAuthorizationRequest } |
-      { 'Err' : GetNativeAuthorizationRequestError }
   >,
   'get_principal' : ActorMethod<[UserNumber, FrontendHostname], Principal>,
   /**
@@ -1671,19 +1627,19 @@ export interface _SERVICE {
     { 'Ok' : PreparedIdAlias } |
       { 'Err' : PrepareIdAliasError }
   >,
-  'prepare_native_authorization' : ActorMethod<
-    [PrepareNativeAuthorizationRequest],
-    { 'Ok' : PrepareNativeAuthorizationResponse } |
-      { 'Err' : PrepareNativeAuthorizationError }
-  >,
-  'start_native_authorization' : ActorMethod<
-    [StartNativeAuthorizationRequest],
-    { 'Ok' : StartNativeAuthorizationResponse } |
-      { 'Err' : PrepareNativeAuthorizationError }
+  'redeem_native_authorization_code' : ActorMethod<
+    [RedeemNativeAuthorizationCodeRequest],
+    { 'Ok' : RedeemNativeAuthorizationCodeResponse } |
+      { 'Err' : RedeemNativeAuthorizationCodeError }
   >,
   'register' : ActorMethod<
     [DeviceData, ChallengeResult, [] | [Principal]],
     RegisterResponse
+  >,
+  'register_native_authorization_request' : ActorMethod<
+    [RegisterNativeAuthorizationRequest],
+    { 'Ok' : RegisterNativeAuthorizationResponse } |
+      { 'Err' : PrepareNativeAuthorizationError }
   >,
   'remove' : ActorMethod<[UserNumber, DeviceKey], undefined>,
   /**
