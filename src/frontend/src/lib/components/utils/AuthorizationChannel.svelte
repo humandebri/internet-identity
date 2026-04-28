@@ -48,9 +48,22 @@
     typeof window === "undefined"
       ? new URLSearchParams()
       : new URL(window.location.href).searchParams;
-  const isNativeOidcAuthorizeRequest =
-    authorizeParams.get("response_type") === "code" &&
-    authorizeParams.has("client_id");
+  const nativeOidcAuthorizeParamNames = [
+    "response_type",
+    "client_id",
+    "redirect_uri",
+    "scope",
+    "state",
+    "nonce",
+    "code_challenge",
+    "code_challenge_method",
+    "ic_origin",
+    "ic_session_public_key",
+    "ic_max_time_to_live",
+  ];
+  const isNativeOidcAuthorizeRequest = nativeOidcAuthorizeParamNames.some(
+    (name) => authorizeParams.has(name),
+  );
 
   const authorizeChannel = (channel: Channel): Promise<void> =>
     new Promise<void>((resolve, reject) => {
