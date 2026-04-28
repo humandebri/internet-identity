@@ -421,10 +421,6 @@ pub fn usage_metrics_mut<R>(f: impl FnOnce(&mut UsageMetrics) -> R) -> R {
     STATE.with(|s| f(&mut s.usage_metrics.borrow_mut()))
 }
 
-pub fn native_authorizations<R>(f: impl FnOnce(&NativeAuthorizationState) -> R) -> R {
-    STATE.with(|s| f(&s.native_authorizations.borrow()))
-}
-
 pub fn native_authorizations_mut<R>(f: impl FnOnce(&mut NativeAuthorizationState) -> R) -> R {
     STATE.with(|s| f(&mut s.native_authorizations.borrow_mut()))
 }

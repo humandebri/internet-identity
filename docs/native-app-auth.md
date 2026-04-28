@@ -1,12 +1,13 @@
 # Native Browser Authorization
 
-II native browser authorization now follows a discovery-first OAuth-style split flow:
+II native browser authorization is compatible with the OIDC authorization request shape and adds
+IC delegation extension parameters:
 
 1. Native app reads `/.well-known/openid-configuration`.
 2. II returns `authorization_endpoint`, `token_endpoint`, and the IC extension
    `ic_delegation_endpoint`.
-3. Native app prepares the II native authorization request and opens the discovered
-   authorization endpoint URL in a browser.
+3. Native app opens the discovered `authorization_endpoint` in a browser with a standard
+   authorization-code request and IC extension parameters.
 4. II completes user authentication on `/authorize`.
 5. II redirects to `redirect_uri?code=<authorization_code>&state=<state>`.
 6. Native app redeems the code at the discovered `token_endpoint`.
@@ -14,7 +15,7 @@ II native browser authorization now follows a discovery-first OAuth-style split 
 8. Native app fetches the IC delegation from the discovered `ic_delegation_endpoint`.
 9. II returns the regular IC delegation (`user_key` and `signed_delegation`).
 
-Successful code redemption consumes the prepared authorization request and authorization code
+Successful code redemption consumes the pending authorization request and authorization code
 records. Completed logins do not occupy request or code capacity until TTL expiry.
 
 ## DX Model
@@ -23,7 +24,7 @@ records. Completed logins do not occupy request or code capacity until TTL expir
   1. `/oauth2/token`
   2. `/oauth2/delegation`
 - Developer experience can stay 1-flow:
-  - Use any standard OIDC client for the authorization code exchange.
+  - Use standard OIDC discovery and authorization-code request construction.
   - Add one thin II-specific helper call for certified delegation retrieval.
 
 `authorization_endpoint` and `token_endpoint` are standard OIDC discovery fields.
@@ -39,6 +40,9 @@ Frontend code now has a thin utility at
   - Resolves discovery when needed.
   - Can use an explicit `tokenEndpoint` without discovery.
 - Calls `POST /oauth2/token`.
+- `buildNativeOidcAuthorizationUrl(...)`
+  - Builds the browser URL for the discovered `authorization_endpoint`.
+  - Adds standard OIDC request parameters plus IC extension parameters.
 - `fetchIcDelegation(...)`
   - Uses `Authorization: Bearer <access_token>` with `GET /oauth2/delegation`.
   - Converts the response into a frontend `DelegationChain`.
@@ -51,9 +55,24 @@ Minimal example:
 
 ```ts
 import { Ed25519KeyIdentity } from "@icp-sdk/core/identity";
-import { completeNativeOidcLogin } from "$lib/utils/authentication";
+import {
+  buildNativeOidcAuthorizationUrl,
+  completeNativeOidcLogin,
+} from "$lib/utils/authentication";
 
 const sessionIdentity = Ed25519KeyIdentity.generate();
+const authorizationUrl = await buildNativeOidcAuthorizationUrl({
+  issuer: "https://identity.ic0.app",
+  clientId: "com.example.app",
+  redirectUri: "com.example.app:/oauth2redirect/ii",
+  state,
+  nonce,
+  codeChallenge,
+  origin: "https://app.example.com",
+  sessionPublicKey: sessionIdentity.getPublicKey().toDer(),
+});
+
+openBrowser(authorizationUrl);
 
 const { tokenResponse, delegationIdentity } = await completeNativeOidcLogin({
   issuer: "https://identity.ic0.app",
@@ -156,10 +175,9 @@ Prefer the header transport and avoid copying or persisting legacy request URLs.
 - The legacy query transport stays available as a temporary compatibility path for clients that
   still rely on URL-based delegation exchange. New integrations should treat it as deprecated and
   use the `Authorization` header transport instead.
-- `prepare_native_authorization` is anonymously callable and currently uses only global capacity
-  limits for pending requests and exchange tokens. Successful token redemption releases request and
-  authorization-code capacity, but the flow does not yet provide per-client, per-origin, or
-  caller-scoped abuse controls.
+- Native authorization requests are created from the browser-facing `authorization_endpoint`.
+  Pending request and exchange-token capacity currently use global limits; the flow does not yet
+  provide per-client, per-origin, or caller-scoped abuse controls.
 - Access-token exchange stays on a query path for low-latency delegation retrieval. Native access
   tokens are short-lived bearer exchange tokens and can be reused until expiry.
 - `id_token.sub` is pairwise per `client_id`, but it is still derived under the configured issuer.
@@ -182,25 +200,20 @@ Rejected redirect URIs include:
 - Non-lowercase or ambiguous private-use schemes such as `Com.Example.App:/callback`,
   `1.example:/callback`, or `com.-example.app:/callback`
 
-For claimed HTTPS redirects, `redirect_uri` must match the prepared `origin`. Private-use and
+For claimed HTTPS redirects, `redirect_uri` must match `ic_origin`. Private-use and
 loopback redirects are validated by URI class, registered `redirect_uri` membership, and registered
 `allowed_origins` membership. Loopback registration ignores the port and matches on host plus path,
 so native apps can use an ephemeral port per authorization request.
 
 ## Request Binding
 
-`prepare_native_authorization` requires:
+The browser authorization request uses standard OIDC parameters:
 
 - `client_id`
 - `redirect_uri`
-- `ii_origin`
-  - Must be an HTTPS origin.
-  - Optional trailing slash is accepted.
-  - Paths other than `/`, query, and fragment are rejected.
 - `state`
 - `scope` including `openid`
-  - Represented as repeated Candid strings rather than as a single space-delimited OAuth `scope`
-    parameter.
+  - Space-delimited as in OAuth/OIDC.
   - At most 16 values.
   - Each value must be non-empty visible ASCII and at most 64 bytes.
   - Duplicate values are rejected.
@@ -209,7 +222,19 @@ so native apps can use an ephemeral port per authorization request.
   - Must satisfy RFC 7636 length bounds: 43-128 characters.
 - `code_challenge_method` set to `S256`
 - `response_type` set to `code`
-- `response_mode` set to `query`
+
+II native delegation adds IC extension parameters:
+
+- `ic_origin`
+  - HTTPS origin bound to the issued IC delegation.
+  - Must be registered in the native client `allowed_origins`.
+  - Required because IC delegation validity is bound to an origin that is separate from the native
+    app redirect URI.
+- `ic_session_public_key`
+  - Base64url-encoded session public key for the IC delegation.
+  - Required because the issued delegation must authorize the native app's local session key.
+- `ic_max_time_to_live`
+  - Optional TTL in nanoseconds.
 
 Native clients must also be statically registered in II config. Each registration contains:
 
@@ -221,11 +246,11 @@ Native clients must also be statically registered in II config. Each registratio
 - `require_pkce = true`
 
 `client_id` is a registered native client identifier. It does not need to be a developer domain or
-HTTPS origin. `origin` must be a registered HTTPS origin in `allowed_origins`; it is the delegation
+HTTPS origin. `ic_origin` must be a registered HTTPS origin in `allowed_origins`; it is the delegation
 origin that will be bound to the issued IC delegation.
 
-Registration is always bound to the `client_id` / `redirect_uri` / `origin` triple. Claimed HTTPS
-redirects add one extra check: `origin` must match the redirect origin.
+Registration is always bound to the `client_id` / `redirect_uri` / `ic_origin` triple. Claimed HTTPS
+redirects add one extra check: `ic_origin` must match the redirect origin.
 
 ## Token Semantics
 

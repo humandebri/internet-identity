@@ -12,6 +12,7 @@ import { anonymousActor, frontendCanisterConfig } from "$lib/globals";
 import { validateDerivationOrigin } from "$lib/utils/validateDerivationOrigin";
 import { DelegationChain } from "@icp-sdk/core/identity";
 import { AuthRequest, DelegationParams } from "$lib/utils/transport/utils";
+import { fromBase64URL } from "$lib/utils/utils";
 
 export type AuthorizationContext = {
   kind: "channel" | "native";
@@ -39,7 +40,7 @@ type AuthorizationStore = Readable<AuthorizationContext | undefined> & {
     requestId: string | number,
     params: DelegationParams,
   ) => Promise<void>;
-  handleNativeRequest: (requestId: string) => Promise<void>;
+  handleNativeOidcAuthorizeRequest: (params: URLSearchParams) => Promise<void>;
   authorize: (
     accountNumber: Promise<bigint | undefined> | bigint | undefined,
     artificialDelay?: number,
@@ -74,21 +75,21 @@ export const authorizationStore: AuthorizationStore = {
       isAuthenticating: false,
     });
   },
-  handleNativeRequest: async (requestId) => {
-    const { origin, session_public_key, max_time_to_live } =
-      await anonymousActor
-        .get_native_authorization_request(requestId)
-        .then(throwCanisterError);
+  handleNativeOidcAuthorizeRequest: async (params) => {
+    const request = nativeOidcAuthorizeRequest(params);
+    const { request_id } = await anonymousActor
+      .register_native_authorization_request(request)
+      .then(throwCanisterError);
     internalStore.set({
       kind: "native",
       authRequest: {
         kind: "authorize-client",
-        sessionPublicKey: new Uint8Array(session_public_key),
-        maxTimeToLive: max_time_to_live[0],
+        sessionPublicKey: new Uint8Array(request.session_public_key),
+        maxTimeToLive: request.max_time_to_live[0],
       },
-      requestId,
-      requestOrigin: origin,
-      effectiveOrigin: origin,
+      requestId: request_id,
+      requestOrigin: request.origin,
+      effectiveOrigin: request.origin,
       isAuthenticating: false,
     });
   },
@@ -158,6 +159,65 @@ export const authorizationStore: AuthorizationStore = {
     };
   },
 };
+
+const requiredNativeAuthorizeParam = (
+  params: URLSearchParams,
+  name: string,
+): string => {
+  const values = params.getAll(name);
+  if (values.length !== 1 || values[0] === "") {
+    throw new Error(`Invalid native OIDC authorization request: ${name}`);
+  }
+  return values[0];
+};
+
+const optionalNativeAuthorizeNat64 = (
+  params: URLSearchParams,
+  name: string,
+): [] | [bigint] => {
+  const values = params.getAll(name);
+  if (values.length === 0) {
+    return [];
+  }
+  if (values.length !== 1 || !/^[0-9]+$/.test(values[0])) {
+    throw new Error(`Invalid native OIDC authorization request: ${name}`);
+  }
+  return [BigInt(values[0])];
+};
+
+const nativeAuthorizeSessionPublicKey = (
+  params: URLSearchParams,
+): Uint8Array => {
+  try {
+    return fromBase64URL(
+      requiredNativeAuthorizeParam(params, "ic_session_public_key"),
+    );
+  } catch {
+    throw new Error(
+      "Invalid native OIDC authorization request: ic_session_public_key",
+    );
+  }
+};
+
+const nativeOidcAuthorizeRequest = (params: URLSearchParams) => ({
+  response_type: requiredNativeAuthorizeParam(params, "response_type"),
+  client_id: requiredNativeAuthorizeParam(params, "client_id"),
+  redirect_uri: requiredNativeAuthorizeParam(params, "redirect_uri"),
+  scope: requiredNativeAuthorizeParam(params, "scope"),
+  state: requiredNativeAuthorizeParam(params, "state"),
+  nonce: requiredNativeAuthorizeParam(params, "nonce"),
+  code_challenge: requiredNativeAuthorizeParam(params, "code_challenge"),
+  code_challenge_method: requiredNativeAuthorizeParam(
+    params,
+    "code_challenge_method",
+  ),
+  origin: requiredNativeAuthorizeParam(params, "ic_origin"),
+  session_public_key: nativeAuthorizeSessionPublicKey(params),
+  max_time_to_live: optionalNativeAuthorizeNat64(
+    params,
+    "ic_max_time_to_live",
+  ),
+});
 
 export const authorizationContextStore: Readable<AuthorizationContext> =
   derived(authorizationStore, (context) => {

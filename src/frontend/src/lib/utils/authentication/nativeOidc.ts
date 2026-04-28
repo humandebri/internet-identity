@@ -7,7 +7,7 @@ import type {
   ExchangeNativeAccessTokenForDelegationResponse,
   RedeemNativeAuthorizationCodeResponse,
 } from "$lib/generated/internet_identity_types";
-import { transformSignedDelegation } from "$lib/utils/utils";
+import { toBase64URL, transformSignedDelegation } from "$lib/utils/utils";
 import type { SignIdentity } from "@icp-sdk/core/agent";
 import { DelegationChain, DelegationIdentity } from "@icp-sdk/core/identity";
 import {
@@ -36,6 +36,22 @@ type NativeOidcCodeExchangeEndpointConfig = NativeOidcEndpointConfig & {
 
 type NativeOidcDelegationEndpointConfig = NativeOidcEndpointConfig & {
   delegationEndpoint?: string;
+};
+
+type NativeOidcAuthorizationEndpointConfig = NativeOidcEndpointConfig & {
+  authorizationEndpoint?: string;
+};
+
+type NativeOidcAuthorizationUrlInput = NativeOidcAuthorizationEndpointConfig & {
+  clientId: string;
+  redirectUri: string;
+  scope?: string[];
+  state: string;
+  nonce: string;
+  codeChallenge: string;
+  origin: string;
+  sessionPublicKey: Uint8Array;
+  maxTimeToLive?: bigint | number;
 };
 
 type NativeOidcCodeExchangeInput = NativeOidcCodeExchangeEndpointConfig & {
@@ -119,6 +135,30 @@ export const exchangeNativeOidcCode = async (
     });
   }
   return parseTokenResponse(parsed);
+};
+
+export const buildNativeOidcAuthorizationUrl = async (
+  input: NativeOidcAuthorizationUrlInput,
+): Promise<string> => {
+  const authorizationEndpoint = await resolveAuthorizationEndpoint(input);
+  const url = new URL(authorizationEndpoint);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("client_id", input.clientId);
+  url.searchParams.set("redirect_uri", input.redirectUri);
+  url.searchParams.set("scope", (input.scope ?? ["openid"]).join(" "));
+  url.searchParams.set("state", input.state);
+  url.searchParams.set("nonce", input.nonce);
+  url.searchParams.set("code_challenge", input.codeChallenge);
+  url.searchParams.set("code_challenge_method", "S256");
+  url.searchParams.set("ic_origin", input.origin);
+  url.searchParams.set(
+    "ic_session_public_key",
+    toBase64URL(input.sessionPublicKey),
+  );
+  if (input.maxTimeToLive !== undefined) {
+    url.searchParams.set("ic_max_time_to_live", `${input.maxTimeToLive}`);
+  }
+  return url.toString();
 };
 
 export const fetchIcDelegation = async (
@@ -280,4 +320,33 @@ const resolveDelegationEndpoint = async (
       fetchFn: input.fetchFn,
     })
   ).delegationEndpoint;
+};
+
+const resolveAuthorizationEndpoint = async (
+  input: NativeOidcAuthorizationEndpointConfig,
+): Promise<string> => {
+  if (input.authorizationEndpoint !== undefined) {
+    return input.authorizationEndpoint;
+  }
+  if (input.issuer === undefined) {
+    throw new NativeOidcError({
+      phase: "discovery",
+      code: "invalid_configuration",
+      message: "issuer is required when authorizationEndpoint is missing",
+    });
+  }
+  const authorizationEndpoint = (
+    await resolveNativeOidcEndpoints({
+      issuer: input.issuer,
+      fetchFn: input.fetchFn,
+    })
+  ).authorizationEndpoint;
+  if (authorizationEndpoint === undefined) {
+    throw new NativeOidcError({
+      phase: "discovery",
+      code: "invalid_configuration",
+      message: "authorization_endpoint is missing from discovery",
+    });
+  }
+  return authorizationEndpoint;
 };

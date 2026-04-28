@@ -44,10 +44,26 @@
 
   const { options, children }: Props = $props();
 
-  const nativeRequestId =
+  const authorizeParams =
     typeof window === "undefined"
-      ? null
-      : new URL(window.location.href).searchParams.get("native_request_id");
+      ? new URLSearchParams()
+      : new URL(window.location.href).searchParams;
+  const nativeOidcAuthorizeParamNames = [
+    "response_type",
+    "client_id",
+    "redirect_uri",
+    "scope",
+    "state",
+    "nonce",
+    "code_challenge",
+    "code_challenge_method",
+    "ic_origin",
+    "ic_session_public_key",
+    "ic_max_time_to_live",
+  ];
+  const isNativeOidcAuthorizeRequest = nativeOidcAuthorizeParamNames.some(
+    (name) => authorizeParams.has(name),
+  );
 
   const authorizeChannel = (channel: Channel): Promise<void> =>
     new Promise<void>((resolve, reject) => {
@@ -97,15 +113,16 @@
       });
     });
 
-  const authorizeNativeRequest = async (requestId: string): Promise<void> => {
+  const authorizeNativeOidcRequest = async (): Promise<void> => {
     try {
-      await authorizationStore.handleNativeRequest(requestId);
+      await authorizationStore.handleNativeOidcAuthorizeRequest(authorizeParams);
     } catch (error) {
       if (isCanisterError(error)) {
         if (
-          error.type === "expired" ||
-          error.type === "not_found" ||
-          error.type === "already_completed"
+          error.type === "invalid_origin" ||
+          error.type === "invalid_redirect_uri" ||
+          error.type === "invalid_request" ||
+          error.type === "too_many_requests"
         ) {
           throw new AuthorizeChannelError(
             $t`Invalid request`,
@@ -113,13 +130,22 @@
           );
         }
       }
+      if (
+        error instanceof Error &&
+        error.message.startsWith("Invalid native OIDC authorization request:")
+      ) {
+        throw new AuthorizeChannelError(
+          $t`Invalid request`,
+          $t`It seems like an invalid authentication request was received.`,
+        );
+      }
       throw error;
     }
   };
 
   let authorizePromise = $state(
-    nativeRequestId !== null
-      ? authorizeNativeRequest(nativeRequestId)
+    isNativeOidcAuthorizeRequest
+        ? authorizeNativeOidcRequest()
       : channelStore
           .establish(options)
           .catch((error) => {

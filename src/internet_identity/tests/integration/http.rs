@@ -20,7 +20,7 @@ use internet_identity_interface::internet_identity::types::{
     AuthnMethod, AuthnMethodData, CaptchaConfig, CaptchaTrigger, ChallengeAttempt, DeviceData,
     FrontendHostname, InternetIdentityInit, InternetIdentitySynchronizedConfig, MetadataEntryV2,
     NativeOidcApplicationType, NativeOidcClientConfig, NativeOidcTokenEndpointAuthMethod,
-    OpenIdConfig, PrepareNativeAuthorizationRequest,
+    OpenIdConfig, RegisterNativeAuthorizationRequest,
 };
 use pocket_ic::{PocketIc, RejectResponse};
 use serde_bytes::ByteBuf;
@@ -1028,45 +1028,30 @@ fn ii_canister_serves_native_oidc_token_and_delegation_http_endpoints() -> Resul
     api::init_salt(&env, canister_id)?;
     let anchor_number = flows::register_anchor(&env, canister_id);
 
-    let prepared = api::prepare_native_authorization(
+    let started = api::register_native_authorization_request(
         &env,
         canister_id,
-        &PrepareNativeAuthorizationRequest {
+        &RegisterNativeAuthorizationRequest {
             origin: "https://app.example.com".to_string(),
-            ii_origin: "https://identity.ic0.app".to_string(),
             session_public_key: ByteBuf::from(b"native session key".to_vec()),
             redirect_uri: redirect_uri.to_string(),
             client_id: client_id.to_string(),
             state: "state-123".to_string(),
-            scope: vec!["openid".to_string()],
+            scope: "openid".to_string(),
             nonce: "nonce-123".to_string(),
             code_challenge: URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes())),
             code_challenge_method: "S256".to_string(),
             response_type: "code".to_string(),
-            response_mode: "query".to_string(),
             max_time_to_live: None,
         },
     )?
-    .expect("prepare should succeed");
-    let request_id = {
-        let authorize_url = prepared.authorize_url.clone();
-        let (_, query) = authorize_url
-            .split_once('?')
-            .expect("authorize_url should contain query");
-        query
-            .split('&')
-            .find_map(|pair| {
-                let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
-                (key == "native_request_id").then(|| value.to_string())
-            })
-            .expect("authorize_url should include native_request_id")
-    };
+    .expect("start should succeed");
     let completed = api::complete_native_authorization(
         &env,
         canister_id,
         principal_1(),
         anchor_number,
-        &request_id,
+        &started.request_id,
         None,
     )?
     .expect("completion should succeed");
@@ -1242,7 +1227,7 @@ fn ii_canister_serves_native_oidc_token_and_delegation_http_endpoints() -> Resul
             body: ByteBuf::from(
                 format!(
                     "grant_type=authorization_code&code={}&redirect_uri={}&client_id={}",
-                    request_id, redirect_uri, client_id
+                    started.request_id, redirect_uri, client_id
                 )
                 .into_bytes(),
             ),

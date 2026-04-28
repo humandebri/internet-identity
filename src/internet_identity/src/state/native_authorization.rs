@@ -18,7 +18,6 @@ pub struct NativeAuthorizationRecord {
     pub redirect_uri: String,
     pub client_id: String,
     pub state: String,
-    pub scope: Vec<String>,
     pub nonce: String,
     pub code_challenge: String,
     pub code_challenge_method: String,
@@ -87,6 +86,7 @@ impl NativeAuthorizationState {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn get(&self, request_id: &str) -> Option<&NativeAuthorizationRecord> {
         self.records.get(request_id)
     }
@@ -294,7 +294,6 @@ mod tests {
             redirect_uri: "https://app.example.com/callback".to_string(),
             client_id: "https://app.example.com".to_string(),
             state: "state".to_string(),
-            scope: vec!["openid".to_string()],
             nonce: "nonce".to_string(),
             code_challenge: "challenge".to_string(),
             code_challenge_method: "S256".to_string(),

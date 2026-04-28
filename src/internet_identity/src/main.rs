@@ -357,17 +357,10 @@ async fn prepare_delegation(
 }
 
 #[update]
-async fn prepare_native_authorization(
-    request: PrepareNativeAuthorizationRequest,
-) -> Result<PrepareNativeAuthorizationResponse, PrepareNativeAuthorizationError> {
-    native_authorization::prepare(request).await
-}
-
-#[query]
-fn get_native_authorization_request(
-    request_id: String,
-) -> Result<NativeAuthorizationRequest, GetNativeAuthorizationRequestError> {
-    native_authorization::get_request(&request_id)
+async fn register_native_authorization_request(
+    request: RegisterNativeAuthorizationRequest,
+) -> Result<RegisterNativeAuthorizationResponse, PrepareNativeAuthorizationError> {
+    native_authorization::register(request).await
 }
 
 #[update]
