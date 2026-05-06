@@ -1,5 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const hostResolverRules =
+  "MAP * localhost:5173, EXCLUDE localhost, EXCLUDE *.local.localhost";
+
 /**
  * Read environment variables from file.
  * https://github.com/motdotla/dotenv
@@ -42,7 +45,7 @@ export default defineConfig({
         launchOptions: {
           args: [
             "--ignore-certificate-errors",
-            "--host-resolver-rules=MAP * localhost:5173, EXCLUDE localhost",
+            `--host-resolver-rules=${hostResolverRules}`,
           ],
         },
       },
@@ -54,7 +57,7 @@ export default defineConfig({
         launchOptions: {
           args: [
             "--ignore-certificate-errors",
-            "--host-resolver-rules=MAP * localhost:5173, EXCLUDE localhost",
+            `--host-resolver-rules=${hostResolverRules}`,
           ],
         },
       },

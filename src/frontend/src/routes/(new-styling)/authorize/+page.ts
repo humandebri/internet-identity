@@ -46,5 +46,9 @@ export const load: PageLoad = ({ url }) => {
     return { flow: "openid-resume" as const };
   }
 
+  if (url.searchParams.has("native_request_id")) {
+    return { flow: "native" as const };
+  }
+
   return { flow: "normal" as const };
 };

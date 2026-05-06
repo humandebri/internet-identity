@@ -229,11 +229,14 @@ pub async fn complete(
     )?;
 
     let now = time();
-    let authorization_code = random_token(REQUEST_ID_NUM_BYTES).await.map_err(|err| {
-        CompleteNativeAuthorizationError::InternalCanisterError(format!(
-            "failed to generate authorization code: {err}"
-        ))
-    })?;
+    let authorization_code = release_claim_on_error(
+        random_token(REQUEST_ID_NUM_BYTES).await.map_err(|err| {
+            CompleteNativeAuthorizationError::InternalCanisterError(format!(
+                "failed to generate authorization code: {err}"
+            ))
+        }),
+        request_id,
+    )?;
     let authorized = AuthorizedNativeAuthorization {
         anchor_number,
         account_number,
@@ -241,20 +244,23 @@ pub async fn complete(
         expiration: prepared.expiration,
     };
 
-    state::native_authorizations_mut(|native_authorizations| {
-        native_authorizations.complete_claimed_with_authorization_code(
-            request_id,
-            authorized,
-            now.saturating_add(COMPLETED_REQUEST_GRACE_PERIOD_NS),
-            authorization_code.clone(),
-            AuthorizationCodeRecord {
-                request_id: request_id.to_string(),
-                expires_at: now.saturating_add(CODE_TTL_NS),
-                redeemed_at: None,
-            },
-            now,
-        )
-    })?;
+    release_claim_on_error(
+        state::native_authorizations_mut(|native_authorizations| {
+            native_authorizations.complete_claimed_with_authorization_code(
+                request_id,
+                authorized,
+                now.saturating_add(COMPLETED_REQUEST_GRACE_PERIOD_NS),
+                authorization_code.clone(),
+                AuthorizationCodeRecord {
+                    request_id: request_id.to_string(),
+                    expires_at: now.saturating_add(CODE_TTL_NS),
+                    redeemed_at: None,
+                },
+                now,
+            )
+        }),
+        request_id,
+    )?;
     let redirect_url =
         format_redirect_url(&record.redirect_uri, &authorization_code, &record.state);
 

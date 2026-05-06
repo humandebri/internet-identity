@@ -3,6 +3,8 @@ import path from "path";
 import { test } from "./";
 
 const pathToExtension = path.resolve("demos/test-app/dist");
+const hostResolverRules =
+  "MAP * localhost:5173, EXCLUDE localhost, EXCLUDE *.local.localhost";
 
 export const chromeExtensionTest = test.extend<{
   context: BrowserContext;
@@ -18,7 +20,7 @@ export const chromeExtensionTest = test.extend<{
         `--disable-extensions-except=${pathToExtension}`,
         `--load-extension=${pathToExtension}`,
         "--ignore-certificate-errors",
-        "--host-resolver-rules=MAP * localhost:5173, EXCLUDE localhost",
+        `--host-resolver-rules=${hostResolverRules}`,
       ],
     });
     // Close the default about:blank page so that page indices align
