@@ -3,7 +3,7 @@ import { II_URL } from "../../utils";
 import { test } from "../../fixtures";
 
 const backendConfigUrl =
-  "http://internet_identity.local.localhost:8000/.config.did.bin";
+  "https://backend.id.ai/.config.did.bin";
 
 test("Shows an error for an unknown native authorization request", async ({
   page,

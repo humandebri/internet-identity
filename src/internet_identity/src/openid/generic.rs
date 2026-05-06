@@ -1089,7 +1089,7 @@ fn verify_claims(
 
 #[cfg(test)]
 thread_local! {
-    static TEST_CALLER: Cell<Principal> = Cell::new(Principal::from_slice(&[211, 40, 186, 145, 43, 2, 6, 17, 232, 23, 22, 44, 51, 178, 233, 163, 131, 231, 82, 174, 66, 201, 203, 1, 102, 109, 20, 75, 2]));
+    static TEST_CALLER: Cell<Principal> = const { Cell::new(Principal::from_slice(&[211, 40, 186, 145, 43, 2, 6, 17, 232, 23, 22, 44, 51, 178, 233, 163, 131, 231, 82, 174, 66, 201, 203, 1, 102, 109, 20, 75, 2])) };
     static TEST_TIME: Cell<u64> = const { Cell::new(secs_to_nanos(1_740_583_712)) };
     static TEST_CERTS: Cell<Vec<Jwk>> = Cell::new(serde_json::from_str::<Certs>(r#"{"keys":[{"kty":"RSA","n":"0dbaWQrLCbYfGU1ezvZ6eV00s3knn0vxX6gYjwVDVfWcNYlyUh9-jOQdHYfO5DyNW2IjdrRby_zsgusACCrMrz1TvX7N17DEEHiPOJ1n8er8-WZr2kXOGx7V219xEfCU0BT-Xy2n5iAlA-JVlrvpbP3mJEVOgGV4DH7R959ZU3efqCNmGbDXkC2iAoSoltd-6UCWw9B5u1rkm9mH4rL9Jcdbx-_CQpj9s-UUY3PAbtd1E2VIB6MGavYTkX2vKh-F6TwFdAXVE7FrTRzrA8bNRVHW-9gm2D6aUCvxQrrnx-nGTfUFFK-lA6mfUBqZU9TLAJxY6j2Lo88zz0vBF9ZaFw","e":"AQAB","kid":"test-rsa-key","alg":"RS256","use":"sig"}]}"#).unwrap().keys);
 }
