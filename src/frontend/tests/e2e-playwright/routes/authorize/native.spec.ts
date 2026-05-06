@@ -2,8 +2,7 @@ import { expect } from "@playwright/test";
 import { II_URL } from "../../utils";
 import { test } from "../../fixtures";
 
-const backendConfigUrl =
-  "https://backend.id.ai/.config.did.bin";
+const backendConfigUrl = "https://backend.id.ai/.config.did.bin";
 
 test("Shows an error for an unknown native authorization request", async ({
   page,
