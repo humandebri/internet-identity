@@ -1,6 +1,7 @@
 import { expect } from "@playwright/test";
 import { addVirtualAuthenticator, II_URL } from "../utils";
 import { test } from "../fixtures";
+import { SSO_OPENID_PORT } from "../fixtures/sso";
 
 const DEFAULT_USER_NAME = "John Doe";
 const SECONDARY_USER_NAME = "Jane Doe";
@@ -9,7 +10,6 @@ test.describe("First visit", () => {
   test("Sign up with a new passkey", async ({ page }) => {
     await addVirtualAuthenticator(page);
     await page.goto(II_URL);
-    await page.getByRole("button", { name: "Sign in" }).click();
     await page.getByRole("button", { name: "Continue with passkey" }).click();
     await page.getByRole("button", { name: "Create new identity" }).click();
     await page.getByLabel("Identity name").fill(DEFAULT_USER_NAME);
@@ -30,7 +30,6 @@ test.describe("First visit", () => {
   }) => {
     await addAuthenticatorForIdentity(page, identities[0].identityNumber);
     await page.goto(II_URL);
-    await page.getByRole("button", { name: "Sign in" }).click();
     await page.getByRole("button", { name: "Continue with passkey" }).click();
     await page.getByRole("button", { name: "Use existing identity" }).click();
     await managePage.assertVisible();
@@ -54,7 +53,6 @@ test.describe("First visit", () => {
       const newDevicePage = await newDeviceContext.newPage();
       await addVirtualAuthenticator(newDevicePage);
       await newDevicePage.goto(II_URL);
-      await newDevicePage.getByRole("button", { name: "Sign in" }).click();
       await newDevicePage
         .getByRole("button", { name: "Continue with passkey" })
         .click();
@@ -167,7 +165,6 @@ test.describe("First visit", () => {
     }) => {
       // Pick OpenID to continue
       await page.goto(II_URL);
-      await page.getByRole("button", { name: "Sign in" }).click();
       const popupPromise = page.context().waitForEvent("page");
       await page
         .getByRole("button", { name: openIdUsers[0].issuer.name })
@@ -207,7 +204,6 @@ test.describe("First visit", () => {
     }) => {
       // Pick OpenID to continue
       await page.goto(II_URL);
-      await page.getByRole("button", { name: "Sign in" }).click();
       const popupPromise = page.context().waitForEvent("page");
       await page
         .getByRole("button", { name: openIdUsers[0].issuer.name })
@@ -233,6 +229,208 @@ test.describe("First visit", () => {
       ).toBeVisible();
     });
   });
+
+  test.describe("SSO user with name claim", () => {
+    const name = "įìęèéêêëėįì";
+
+    test.use({
+      openIdConfig: {
+        defaultPort: SSO_OPENID_PORT,
+        createUsers: [
+          {
+            claims: { name },
+          },
+        ],
+      },
+    });
+
+    test("Sign up with SSO", async ({
+      page,
+      openSsoPopup,
+      signInWithOpenId,
+      openIdUsers,
+    }) => {
+      // Pick SSO to continue
+      await page.goto(II_URL);
+      const popup = await openSsoPopup(page);
+
+      // Sign in on the IdP page (same flow as direct OpenID)
+      const closePromise = popup.waitForEvent("close", { timeout: 15_000 });
+      await signInWithOpenId(popup, openIdUsers[0].id);
+      await closePromise;
+
+      // Assert that dashboard is shown
+      await page.waitForURL(II_URL + "/manage");
+      await expect(
+        page.getByRole("heading", {
+          name: new RegExp(`Welcome, ${name}!`),
+        }),
+      ).toBeVisible();
+    });
+  });
+
+  test.describe("SSO user without name claim", () => {
+    test.use({
+      openIdConfig: {
+        defaultPort: SSO_OPENID_PORT,
+        createUsers: [
+          {
+            claims: {},
+          },
+        ],
+      },
+    });
+
+    test("Sign up with SSO", async ({
+      page,
+      openSsoPopup,
+      signInWithOpenId,
+      openIdUsers,
+    }) => {
+      await page.goto(II_URL);
+      const popup = await openSsoPopup(page);
+
+      const closePromise = popup.waitForEvent("close", { timeout: 15_000 });
+      await signInWithOpenId(popup, openIdUsers[0].id);
+      await closePromise;
+
+      const name = "John Doe";
+      await page.getByLabel("Identity name").fill(name);
+      await page.getByRole("button", { name: "Create identity" }).click();
+
+      await page.waitForURL(II_URL + "/manage");
+      await expect(
+        page.getByRole("heading", {
+          name: new RegExp(`Welcome, ${name}!`),
+        }),
+      ).toBeVisible();
+    });
+  });
+
+  // Sign-in (not sign-up) tests: the OpenID/SSO user already exists in II
+  // because we go through the sign-up flow first, then clear localStorage
+  // so the next attempt looks like a "first visit" (no last-used row).
+  // The canister recognises the (iss, sub) tuple from the JWT and signs
+  // the user in directly — no name prompt.
+  test.describe("OpenID existing user", () => {
+    const name = "John Doe";
+
+    test.use({
+      openIdConfig: {
+        createUsers: [
+          {
+            claims: { name },
+          },
+        ],
+      },
+    });
+
+    test("Sign in with OpenID", async ({
+      page,
+      managePage,
+      signInWithOpenId,
+      openIdUsers,
+    }) => {
+      // Sign up first so the user exists in II.
+      await page.goto(II_URL);
+      const signUpPopupPromise = page.context().waitForEvent("page");
+      await page
+        .getByRole("button", { name: openIdUsers[0].issuer.name })
+        .click();
+      const signUpPopup = await signUpPopupPromise;
+      const signUpClosePromise = signUpPopup.waitForEvent("close", {
+        timeout: 15_000,
+      });
+      await signInWithOpenId(signUpPopup, openIdUsers[0].id);
+      await signUpClosePromise;
+      await page.waitForURL(II_URL + "/manage");
+
+      // Wipe localStorage AND IdP cookies so the second flow is fully
+      // fresh: no last-used row on the landing page, and the IdP can't
+      // silently reuse the sign-up session and skip the login prompt.
+      await managePage.signOut();
+      await page.evaluate(() => window.localStorage.clear());
+      await page.context().clearCookies();
+      await page.goto(II_URL);
+
+      // Sign in via OpenID — same (iss, sub), so we should jump straight
+      // to /manage without a name prompt.
+      const signInPopupPromise = page.context().waitForEvent("page");
+      await page
+        .getByRole("button", { name: openIdUsers[0].issuer.name })
+        .click();
+      const signInPopup = await signInPopupPromise;
+      const signInClosePromise = signInPopup.waitForEvent("close", {
+        timeout: 15_000,
+      });
+      await signInWithOpenId(signInPopup, openIdUsers[0].id);
+      await signInClosePromise;
+
+      await page.waitForURL(II_URL + "/manage");
+      await expect(
+        page.getByRole("heading", {
+          name: new RegExp(`Welcome, ${name}!`),
+        }),
+      ).toBeVisible();
+    });
+  });
+
+  test.describe("SSO existing user", () => {
+    const name = "John Doe";
+
+    test.use({
+      openIdConfig: {
+        defaultPort: SSO_OPENID_PORT,
+        createUsers: [
+          {
+            claims: { name },
+          },
+        ],
+      },
+    });
+
+    test("Sign in with SSO", async ({
+      page,
+      managePage,
+      openSsoPopup,
+      signInWithOpenId,
+      openIdUsers,
+    }) => {
+      // Sign up first so the user exists in II.
+      await page.goto(II_URL);
+      const signUpPopup = await openSsoPopup(page);
+      const signUpClosePromise = signUpPopup.waitForEvent("close", {
+        timeout: 15_000,
+      });
+      await signInWithOpenId(signUpPopup, openIdUsers[0].id);
+      await signUpClosePromise;
+      await page.waitForURL(II_URL + "/manage");
+
+      // Wipe localStorage AND IdP cookies so the second flow is fully
+      // fresh: no last-used row on the landing page, and the IdP can't
+      // silently reuse the sign-up session and skip the login prompt.
+      await managePage.signOut();
+      await page.evaluate(() => window.localStorage.clear());
+      await page.context().clearCookies();
+      await page.goto(II_URL);
+
+      // Sign in via SSO — the user already exists in II so we should
+      // jump straight to /manage without a name prompt.
+      const signInPopup = await openSsoPopup(page);
+      const signInClosePromise = signInPopup.waitForEvent("close", {
+        timeout: 15_000,
+      });
+      await signInWithOpenId(signInPopup, openIdUsers[0].id);
+      await signInClosePromise;
+
+      await page.waitForURL(II_URL + "/manage");
+      await expect(
+        page.getByRole("heading", {
+          name: new RegExp(`Welcome, ${name}!`),
+        }),
+      ).toBeVisible();
+    });
+  });
 });
 
 test.describe("Last used identities listed", () => {
@@ -248,10 +446,7 @@ test.describe("Last used identities listed", () => {
     await managePage.signOut();
 
     // Sign in again and expect to see the last used identity
-    await page.getByRole("button", { name: "Switch identity" }).click();
-    await page
-      .getByRole("button", { name: "Manage your Internet Identity" })
-      .click();
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
     await page.waitForURL(II_URL + "/manage");
     await expect(
       page.getByRole("heading", {
@@ -272,7 +467,6 @@ test.describe("Last used identities listed", () => {
     await managePage.signOut();
 
     // Now sign in through the use existing identity flow
-    await page.getByRole("button", { name: "Switch identity" }).click();
     await page.getByRole("button", { name: "Add another identity" }).click();
     await page.getByRole("button", { name: "Continue with passkey" }).click();
     await page.getByRole("button", { name: "Use existing identity" }).click();
@@ -294,12 +488,126 @@ test.describe("Last used identities listed", () => {
 
     // Now sign up for a new identity
     await addVirtualAuthenticator(page);
-    await page.getByRole("button", { name: "Switch identity" }).click();
     await page.getByRole("button", { name: "Add another identity" }).click();
     await page.getByRole("button", { name: "Continue with passkey" }).click();
     await page.getByRole("button", { name: "Create new identity" }).click();
     await page.getByLabel("Identity name").fill(SECONDARY_USER_NAME);
     await page.getByRole("button", { name: "Create identity" }).click();
     await managePage.assertVisible();
+  });
+
+  // Last-used sign-in for OpenID / SSO: sign up first to populate the
+  // last-used row, sign out, then click "Manage your Internet Identity"
+  // to drive `AuthLastUsedFlow.authenticate` for the matching variant.
+  test.describe("OpenID last used identity", () => {
+    const name = "John Doe";
+
+    test.use({
+      openIdConfig: {
+        createUsers: [
+          {
+            claims: { name },
+          },
+        ],
+      },
+    });
+
+    test("Sign in with last used OpenID identity", async ({
+      page,
+      managePage,
+      signInWithOpenId,
+      openIdUsers,
+    }) => {
+      // Sign up first to populate the last-used entry.
+      await page.goto(II_URL);
+      const signUpPopupPromise = page.context().waitForEvent("page");
+      await page
+        .getByRole("button", { name: openIdUsers[0].issuer.name })
+        .click();
+      const signUpPopup = await signUpPopupPromise;
+      const signUpClosePromise = signUpPopup.waitForEvent("close", {
+        timeout: 15_000,
+      });
+      await signInWithOpenId(signUpPopup, openIdUsers[0].id);
+      await signUpClosePromise;
+      await page.waitForURL(II_URL + "/manage");
+
+      // Sign out (keeps the last-used entry) and clear IdP cookies so the
+      // re-auth popup actually shows the login UI rather than silently
+      // reusing the sign-up session.
+      await managePage.signOut();
+      await page.context().clearCookies();
+      const signInPopupPromise = page.context().waitForEvent("page");
+      await page.getByRole("button", { name: "Continue", exact: true }).click();
+      const signInPopup = await signInPopupPromise;
+      const signInClosePromise = signInPopup.waitForEvent("close", {
+        timeout: 15_000,
+      });
+      await signInWithOpenId(signInPopup, openIdUsers[0].id);
+      await signInClosePromise;
+
+      await page.waitForURL(II_URL + "/manage");
+      await expect(
+        page.getByRole("heading", {
+          name: new RegExp(`Welcome, ${name}!`),
+        }),
+      ).toBeVisible();
+    });
+  });
+
+  test.describe("SSO last used identity", () => {
+    const name = "John Doe";
+
+    test.use({
+      openIdConfig: {
+        defaultPort: SSO_OPENID_PORT,
+        createUsers: [
+          {
+            claims: { name },
+          },
+        ],
+      },
+    });
+
+    test("Sign in with last used SSO identity", async ({
+      page,
+      managePage,
+      openSsoPopup,
+      signInWithOpenId,
+      openIdUsers,
+    }) => {
+      // Sign up first to populate the last-used SSO entry.
+      await page.goto(II_URL);
+      const signUpPopup = await openSsoPopup(page);
+      const signUpClosePromise = signUpPopup.waitForEvent("close", {
+        timeout: 15_000,
+      });
+      await signInWithOpenId(signUpPopup, openIdUsers[0].id);
+      await signUpClosePromise;
+      await page.waitForURL(II_URL + "/manage");
+
+      // Sign out and clear IdP cookies so the re-auth popup actually
+      // shows the login UI rather than silently reusing the sign-up
+      // session, then trigger the last-used SSO path. The popup opens
+      // synchronously to about:blank (so Safari doesn't block it), then
+      // discoverSsoConfig resolves and the popup navigates to the IdP.
+      await managePage.signOut();
+      await page.context().clearCookies();
+      const signInPopupPromise = page.context().waitForEvent("page");
+      await page.getByRole("button", { name: "Continue", exact: true }).click();
+      const signInPopup = await signInPopupPromise;
+      const signInClosePromise = signInPopup.waitForEvent("close", {
+        timeout: 15_000,
+      });
+      await signInWithOpenId(signInPopup, openIdUsers[0].id);
+      await signInClosePromise;
+
+      await page.waitForURL(II_URL + "/manage");
+      await expect(
+        page.getByRole("heading", {
+          name: new RegExp(`Welcome, ${name}!`),
+        }),
+      ).toBeVisible();
+    });
   });
 });

@@ -1,9 +1,9 @@
 <script lang="ts">
   import ShieldIllustration from "$lib/components/illustrations/ShieldIllustration.svelte";
   import PasskeyIcon from "$lib/components/icons/PasskeyIcon.svelte";
+  import SsoIcon from "$lib/components/icons/SsoIcon.svelte";
   import ProgressRing from "$lib/components/ui/ProgressRing.svelte";
   import Alert from "$lib/components/ui/Alert.svelte";
-  import Button from "$lib/components/ui/Button.svelte";
   import Tooltip from "$lib/components/ui/Tooltip.svelte";
   import { issuerMatches } from "$lib/utils/openID";
   import { backendCanisterConfig } from "$lib/globals";
@@ -18,6 +18,7 @@
   interface Props {
     linkOpenIdAccount: (config: OpenIdConfig) => Promise<"cancelled" | void>;
     continueWithPasskey: () => void;
+    signInWithSso: () => void;
     openIdCredentials?: OpenIdCredential[];
     maxPasskeysReached?: boolean;
   }
@@ -25,6 +26,7 @@
   const {
     linkOpenIdAccount,
     continueWithPasskey,
+    signInWithSso,
     openIdCredentials = [],
     maxPasskeysReached,
   }: Props = $props();
@@ -80,7 +82,7 @@
   {/if}
   <div class="flex flex-col items-stretch gap-3">
     <div class="flex flex-row flex-nowrap justify-stretch gap-3">
-      {#each openIdProviders as provider}
+      {#each openIdProviders as provider (provider.issuer)}
         {@const name = provider.name}
         <Tooltip
           label={$t`Interaction canceled. Please try again.`}
@@ -91,42 +93,53 @@
             label={$t`You already have a ${name} account linked`}
             hidden={!hasCredential(provider.issuer)}
           >
-            <Button
+            <button
+              class="btn btn-secondary btn-xl flex-1"
               onclick={() => handleContinueWithOpenId(provider)}
-              variant="secondary"
               disabled={authenticatingProviderId !== undefined ||
                 hasCredential(provider.issuer)}
-              size="xl"
-              class="flex-1"
               aria-label={$t`Continue with ${name}`}
             >
               {#if authenticatingProviderId === provider.client_id}
                 <ProgressRing />
               {:else if provider.logo}
                 <div class="size-6">
+                  <!-- eslint-disable-next-line svelte/no-at-html-tags -- provider.logo is a trusted SVG string sourced from the backend canister's openid_configs -->
                   {@html provider.logo}
                 </div>
               {/if}
-            </Button>
+            </button>
           </Tooltip>
         </Tooltip>
       {/each}
+      <!--
+        SSO entry is always rendered alongside the named providers. The SSO
+        screen calls `add_discoverable_oidc_config` on submit; domains not on
+        the backend canary allowlist are rejected there.
+      -->
+      <button
+        class="btn btn-secondary btn-xl flex-1"
+        onclick={signInWithSso}
+        disabled={authenticatingProviderId !== undefined}
+        aria-label={$t`Continue with SSO`}
+      >
+        <SsoIcon class="size-6" />
+      </button>
     </div>
     <Tooltip
       label={$t`You have reached the maximum number of passkeys`}
-      hidden={!maxPasskeysReached}
+      hidden={maxPasskeysReached !== true}
     >
-      <Button
+      <button
+        class="btn btn-secondary btn-xl"
         onclick={continueWithPasskey}
-        variant="secondary"
         disabled={!isPasskeySupported ||
           authenticatingProviderId !== undefined ||
           maxPasskeysReached}
-        size="xl"
       >
         <PasskeyIcon />
         <span>{$t`Continue with passkey`}</span>
-      </Button>
+      </button>
     </Tooltip>
   </div>
 </div>

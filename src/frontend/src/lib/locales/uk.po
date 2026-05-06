@@ -22,17 +22,47 @@ msgstr "{0} користувач"
 msgid "{application} has moved to the new Internet Identity"
 msgstr "{application} перейшов до нової версії Internet Identity"
 
+msgid "{attribute}:"
+msgstr "{attribute}:"
+
+msgid "{displayName} account"
+msgstr "Обліковий запис {displayName}"
+
+msgid "{domainInput} didn't publish /.well-known/ii-openid-configuration (HTTP {0})."
+msgstr "{domainInput} не опублікував /.well-known/ii-openid-configuration (HTTP {0})."
+
+msgid "{domainInput}'s /.well-known/ii-openid-configuration is malformed."
+msgstr "Файл /.well-known/ii-openid-configuration домену {domainInput} має неправильний формат."
+
+msgid "{domainInput}'s SSO app doesn't allow the hybrid OAuth flow II requires. Ask the SSO admin to enable response_type \"id_token code\"."
+msgstr "SSO-застосунок домену {domainInput} не дозволяє гібридний потік OAuth, необхідний для II. Попросіть адміністратора SSO увімкнути response_type \"id_token code\"."
+
+msgid "{domainInput}'s SSO denied the sign-in."
+msgstr "SSO домену {domainInput} відхилив вхід."
+
+msgid "{domainInput}'s SSO returned \"{0}\": {1}"
+msgstr "SSO домену {domainInput} повернув \"{0}\": {1}"
+
+msgid "{domainInput}'s SSO returned error \"{0}\"."
+msgstr "SSO домену {domainInput} повернув помилку \"{0}\"."
+
 msgid "{identityName} has been removed from this device."
 msgstr "{identityName} було видалено з цього пристрою."
 
 msgid "{MAX_ACCOUNTS, plural, one {You have reached the maximum of # account for a single app.} other {You have reached the maximum of # accounts for a single app.}}"
 msgstr "{MAX_ACCOUNTS, plural, one {Ви досягли максимуму # облікового запису для одного застосунку.} few {Ви досягли максимуму # облікових записів для одного застосунку.} many {Ви досягли максимуму # облікових записів для одного застосунку.} other {Ви досягли максимуму # облікових записів для одного застосунку.}}"
 
-msgid "{name} account"
-msgstr "{name} обліковий запис"
-
 msgid "{num, plural, one {# Passkey} other {# Passkeys}}"
 msgstr "{num, plural, one {# ключ доступу} few {# ключі доступу} many {# ключів доступу} other {# ключів доступу}}"
+
+msgid "{providerName} {attribute}:"
+msgstr "{providerName} {attribute}:"
+
+msgid "{providerName} email:"
+msgstr "Електронна пошта {providerName}:"
+
+msgid "{providerName} name:"
+msgstr "Ім'я {providerName}:"
 
 msgid "<0>Completely Redesigned Interface:</0> We've given Internet Identity a fresh, modern look and feel. The new design is intuitive and easier to navigate, ensuring a smoother user journey."
 msgstr "<0>Повністю перероблений інтерфейс:</0> Ми надали Internet Identity свіжого, сучасного вигляду. Новий дизайн інтуїтивний і простіший для навігації, що забезпечує більш плавний користувацький досвід."
@@ -54,6 +84,9 @@ msgstr "<0>Бездоганна інтеграція ключів доступу
 
 msgid "A way to regain access to your identity if you ever lose it."
 msgstr "Спосіб відновити доступ до вашого ідентифікатора, якщо ви його коли-небудь втратите."
+
+msgid "About"
+msgstr "Про сервіс"
 
 msgid "Access and recovery"
 msgstr "Доступ та відновлення"
@@ -103,6 +136,9 @@ msgstr "Додайте або видаліть способи входу за д
 msgid "Advanced identity management"
 msgstr "Розширене керування ідентифікатором"
 
+msgid "Allow to access this info"
+msgstr "Дозволити доступ до цієї інформації"
+
 msgid "Are you sure?"
 msgstr "Ви впевнені?"
 
@@ -112,14 +148,23 @@ msgstr "Оскільки ви наразі увійшли в цей обліко
 msgid "As you are currently signed in with this passkey, you will be signed out."
 msgstr "Оскільки ви наразі увійшли з цим ключем доступу, вас буде виведено з нього."
 
+msgid "Attribute sharing failed"
+msgstr "Не вдалося поділитися атрибутами"
+
 msgid "Authenticating..."
 msgstr "Автентифікація..."
+
+msgid "Authentication failed"
+msgstr "Автентифікацію не вдалося виконати"
 
 msgid "Authentication successful"
 msgstr "Автентифікацію успішно виконано"
 
 msgid "Authorize new device"
 msgstr "Авторизувати новий пристрій"
+
+msgid "Back to sign-in options"
+msgstr "Повернутися до варіантів входу"
 
 msgid "Before getting started, find a private place and have your recovery phrase ready. Keep it confidential to protect your identity."
 msgstr "Перш ніж розпочати, знайдіть приватне місце та підготуйте свою фразу відновлення. Зберігайте її конфіденційно, щоб захистити свій ідентифікатор."
@@ -139,6 +184,9 @@ msgstr "Скасувати"
 msgid "CAPTCHA characters"
 msgstr "Символи CAPTCHA"
 
+msgid "Change"
+msgstr "Змінити"
+
 msgid "Characters are case-sensitive"
 msgstr "Символи чутливі до регістру"
 
@@ -151,6 +199,9 @@ msgstr "Перевірка фрази відновлення"
 msgid "Checking your order"
 msgstr "Перевірка вашого замовлення"
 
+msgid "Checking..."
+msgstr "Перевірка..."
+
 msgid "Choose an account"
 msgstr "Виберіть обліковий запис"
 
@@ -162,6 +213,9 @@ msgstr "Виберіть метод"
 
 msgid "Choose method to continue"
 msgstr "Виберіть метод для продовження"
+
+msgid "Choose which details you'd like to share"
+msgstr "Виберіть, якими даними ви хочете поділитися"
 
 msgid "Clear all"
 msgstr "Очистити все"
@@ -177,6 +231,12 @@ msgstr "Закрити меню"
 
 msgid "Code copied to clipboard"
 msgstr "Код скопійовано до буфера обміну"
+
+msgid "Company domain"
+msgstr "Домен компанії"
+
+msgid "company.domain.com"
+msgstr "company.domain.com"
 
 msgid "Complete set-up"
 msgstr "Завершити налаштування"
@@ -213,6 +273,12 @@ msgstr "Продовжити з {name}"
 
 msgid "Continue with passkey"
 msgstr "Продовжити з ключем доступу"
+
+msgid "Continue with SSO"
+msgstr "Продовжити з SSO"
+
+msgid "Couldn't reach {domainInput}. Check the spelling and your network."
+msgstr "Не вдалося підключитися до {domainInput}. Перевірте правильність написання та своє з'єднання."
 
 msgid "Create account"
 msgstr "Створити обліковий запис"
@@ -256,6 +322,9 @@ msgstr "Підтверджено, що Dashlane несумісний."
 msgid "Default"
 msgstr "За замовчуванням"
 
+msgid "Deny All"
+msgstr "Відхилити все"
+
 msgid "Discoverable passkeys"
 msgstr "Виявлювані ключі доступу"
 
@@ -277,11 +346,11 @@ msgstr "Редагувати {name}"
 msgid "Edit account"
 msgstr "Редагувати обліковий запис"
 
+msgid "Email:"
+msgstr "Електронна пошта:"
+
 msgid "Enable multiple accounts"
 msgstr "Увімкнути кілька облікових записів"
-
-msgid "Encountered an internal error while processing the request."
-msgstr "Під час обробки запиту виникла внутрішня помилка."
 
 msgid "Enter a name for your identity to complete the upgrade. Once set, it cannot be changed later."
 msgstr "Введіть ім'я для вашого ідентифікатора, щоб завершити оновлення. Після встановлення його не можна буде змінити пізніше."
@@ -294,6 +363,9 @@ msgstr "Введіть кожне слово у правильному поря�
 
 msgid "Enter recovery phrase"
 msgstr "Введіть фразу відновлення"
+
+msgid "Enter your company domain"
+msgstr "Введіть домен вашої компанії"
 
 msgid "Everything you need to know about Internet Identity, your private, secure, and easy way to log in to apps on the Internet Computer."
 msgstr "Усе, що потрібно знати про Internet Identity — ваш приватний, безпечний та простий спосіб входу в застосунки на Internet Computer."
@@ -431,6 +503,9 @@ msgstr "Неправильно. Спробуйте ще раз з новим к�
 msgid "Interaction canceled. Please try again."
 msgstr "Взаємодія скасована. Будь ласка, спробуйте ще раз."
 
+msgid "Internet Identity"
+msgstr "Internet Identity"
+
 msgid "Internet Identity <0>does not</0> store your biometric data. It stays on your device. Your identity acts as a secure passkey manager."
 msgstr "Internet Identity <0>не</0> зберігає ваші біометричні дані. Вони залишаються на вашому пристрої. Ваш ідентифікатор працює як менеджер безпечних ключів доступу."
 
@@ -464,6 +539,9 @@ msgstr "Недійсне посилання на код"
 msgid "Invalid code. Please check and try again."
 msgstr "Недійсний код. Будь ласка, перевірте та спробуйте ще раз."
 
+msgid "Invalid domain"
+msgstr "Недійсний домен"
+
 msgid "Invalid recovery phrase"
 msgstr "Неправильна фраза відновлення"
 
@@ -487,9 +565,6 @@ msgstr "Здається, було отримано недійсний запи�
 
 msgid "It seems like the connection with the service could not be established. Try a different browser; if the issue persists, contact support."
 msgstr "Здається, з'єднання зі службою не вдалося встановити. Спробуйте інший браузер; якщо проблема не зникне, зверніться до служби підтримки."
-
-msgid "It seems like the connection with the service could not be re-established."
-msgstr "Здається, з'єднання зі службою не вдалося відновити."
 
 msgid "It seems like the request could not be processed."
 msgstr "Здається, запит не вдалося обробити."
@@ -532,6 +607,9 @@ msgstr "Досягнуто ліміту"
 
 msgid "Link copied to clipboard"
 msgstr "Посилання скопійовано в буфер обміну"
+
+msgid "Loading permissions"
+msgstr "Завантаження дозволів"
 
 msgid "Locked legacy recovery phrase"
 msgstr "Заблокована застаріла фраза відновлення"
@@ -596,6 +674,9 @@ msgstr "Назвати обліковий запис"
 msgid "Name your identity"
 msgstr "Назвіть свій ідентифікатор"
 
+msgid "Name:"
+msgstr "Ім'я:"
+
 msgid "No data is shared with Google, Microsoft or Apple on which applications you log in with Internet Identity."
 msgstr "Жодні дані про те, в які застосунки ви входите через Internet Identity, не передаються Google, Microsoft чи Apple."
 
@@ -634,6 +715,9 @@ msgstr "Відкрити в браузері для продовження"
 
 msgid "Open menu"
 msgstr "Відкрити меню"
+
+msgid "Or sign in with another identity"
+msgstr "Або увійдіть з іншим ідентифікатором"
 
 msgid "Pairing link"
 msgstr "Посилання для сполучення"
@@ -707,9 +791,6 @@ msgstr "Фраза відновлення не перевірена"
 msgid "Recovery phrase set"
 msgstr "Фраза відновлення встановлена"
 
-msgid "Redirecting to the app"
-msgstr "Перенаправлення до застосунку"
-
 msgid "Remove"
 msgstr "Видалити"
 
@@ -767,6 +848,9 @@ msgstr "Повернутися до застосунку"
 msgid "Return to application"
 msgstr "Повернутися до застосунку"
 
+msgid "Review Permissions"
+msgstr "Переглянути дозволи"
+
 msgid "Right now"
 msgstr "Зараз"
 
@@ -803,6 +887,12 @@ msgstr "Час сеансу минув"
 msgid "Set as default sign-in"
 msgstr "Встановити як вхід за замовчуванням"
 
+msgid "Several SSO sign-ins are in flight already. Wait a moment."
+msgstr "Декілька входів через SSO вже виконуються. Зачекайте трохи."
+
+msgid "Share {label}"
+msgstr "Поділитися {label}"
+
 msgid "Show all"
 msgstr "Показати все"
 
@@ -812,8 +902,14 @@ msgstr "Увійти"
 msgid "Sign in again to continue where you left off."
 msgstr "Увійдіть знову, щоб продовжити з того місця, де ви зупинилися."
 
+msgid "Sign in or create an identity to access apps without passwords or sharing personal data."
+msgstr "Увійдіть або створіть ідентифікатор, щоб користуватися додатками без паролів і без передачі особистих даних."
+
 msgid "Sign in there."
 msgstr "Увійдіть там."
+
+msgid "Sign in to manage your identity"
+msgstr "Увійдіть, щоб керувати своїм ідентифікатором"
 
 msgid "Sign in using familiar methods"
 msgstr "Увійдіть за допомогою звичних методів"
@@ -821,8 +917,8 @@ msgstr "Увійдіть за допомогою звичних методів"
 msgid "Sign in with another identity"
 msgstr "Увійти з іншим ідентифікатором"
 
-msgid "Sign in with your {name} account from any device."
-msgstr "Увійдіть за допомогою свого облікового запису {name} з будь-якого пристрою."
+msgid "Sign in with your {displayName} account from any device."
+msgstr "Увійдіть зі своїм обліковим записом {displayName} з будь-якого пристрою."
 
 msgid "Sign out"
 msgstr "Вийти"
@@ -855,12 +951,23 @@ msgctxt "The user entered an incorrect value during a verification step"
 msgid "Something is wrong!"
 msgstr "Щось не так!"
 
-msgctxt "Fallback error message when an unexpected error is caught"
-msgid "Something went wrong"
-msgstr "Щось пішло не так"
+msgid "Something went wrong while creating your delegation. Please try again; if the issue persists, contact support."
+msgstr "Під час створення вашого делегування щось пішло не так. Будь ласка, спробуйте ще раз; якщо проблема не зникне, зверніться до служби підтримки."
+
+msgid "Something went wrong while sharing attributes. Please try again; if the issue persists, contact support."
+msgstr "Під час спільного використання атрибутів щось пішло не так. Будь ласка, спробуйте ще раз; якщо проблема не зникне, зверніться до служби підтримки."
 
 msgid "Source code"
 msgstr "Вихідний код"
+
+msgid "SSO"
+msgstr "SSO"
+
+msgid "SSO is not available for \"{domainInput}\" yet. Ask an II admin to register this domain."
+msgstr "SSO ще недоступний для \"{domainInput}\". Попросіть адміністратора II зареєструвати цей домен."
+
+msgid "SSO sign-in for {domainInput} failed. Please try again."
+msgstr "Не вдалося увійти через SSO для {domainInput}. Будь ласка, спробуйте ще раз."
 
 msgid "Start over"
 msgstr "Почати спочатку"
@@ -940,6 +1047,9 @@ msgstr "Виникла проблема з підключенням до зас�
 msgid "This app has moved to the new Internet Identity"
 msgstr "Цей застосунок перейшов до нової версії Internet Identity"
 
+msgid "This browser is not supported."
+msgstr "Цей браузер не підтримується."
+
 msgid "This identity has already been upgraded to the new experience."
 msgstr "Цей ідентифікатор вже оновлено до нового інтерфейсу."
 
@@ -951,6 +1061,9 @@ msgstr "Це може зайняти кілька секунд"
 
 msgid "This passkey is no longer associated with any identity."
 msgstr "Цей ключ доступу більше не пов'язаний з жодним ідентифікатором."
+
+msgid "This SSO is already linked to your identity."
+msgstr "Цей SSO вже пов'язаний з вашим ідентифікатором."
 
 msgid "This YubiKey has older firmware (5.1) that's incompatible."
 msgstr "Цей YubiKey має старішу прошивку (5.1), яка несумісна."
@@ -988,6 +1101,9 @@ msgstr "Щоб продовжити:"
 msgid "To finish setting up your passkey, follow the instructions shown on your <0>new device</0>."
 msgstr "Щоб завершити налаштування вашого ключа доступу, дотримуйтесь інструкцій, показаних на вашому <0>новому пристрої</0>."
 
+msgid "Too many recent attempts for {domainInput}. Wait a few minutes."
+msgstr "Забагато нещодавніх спроб для {domainInput}. Зачекайте кілька хвилин."
+
 msgid "Type each word in the correct order:"
 msgstr "Введіть кожне слово у правильному порядку:"
 
@@ -1005,9 +1121,6 @@ msgstr "Знайомство з Internet Identity"
 
 msgid "Undo"
 msgstr "Скасувати"
-
-msgid "Unexpected error"
-msgstr "Несподівана помилка"
 
 msgid "Unknown"
 msgstr "Невідомо"
@@ -1032,6 +1145,9 @@ msgstr "Розблокувати, щоб продовжити"
 
 msgid "Unsupported"
 msgstr "Не підтримується"
+
+msgid "Unsupported browser"
+msgstr "Непідтримуваний браузер"
 
 msgid "Unsupported Browser"
 msgstr "Непідтримуваний браузер"
@@ -1147,8 +1263,8 @@ msgstr "Ви вже маєте пов'язаний обліковий запис
 msgid "You are upgrading ID <0>{identityNumber}</0>"
 msgstr "Ви оновлюєте ID <0>{identityNumber}</0>"
 
-msgid "You can add it back anytime by signing in with the same {openIdProvider} account."
-msgstr "Ви можете додати її знову будь-коли, увійшовши з тим самим обліковим записом {openIdProvider}."
+msgid "You can add it back anytime by signing in with the same {provider} account."
+msgstr "Ви можете додати її знову будь-коли, увійшовши з тим самим обліковим записом {provider}."
 
 msgid "You can add it back anytime by signing in with the same passkey."
 msgstr "Ви можете додати її знову будь-коли, увійшовши з тим самим ключем доступу."

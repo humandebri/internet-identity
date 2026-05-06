@@ -3,7 +3,7 @@
   import { EllipsisVerticalIcon, Link2OffIcon } from "@lucide/svelte";
   import { nanosToMillis } from "$lib/utils/time";
   import Select from "$lib/components/ui/Select.svelte";
-  import Button from "$lib/components/ui/Button.svelte";
+  import SsoIcon from "$lib/components/icons/SsoIcon.svelte";
   import Tooltip from "$lib/components/ui/Tooltip.svelte";
   import type { OpenIdCredential } from "$lib/generated/internet_identity_types";
   import { formatDate, formatRelative, t } from "$lib/stores/locale.store";
@@ -16,9 +16,23 @@
 
   const { openid, onUnlink, isCurrentAccessMethod }: Props = $props();
 
-  const name = $derived(openIdName(openid.iss, openid.metadata));
+  // `sso_domain` / `sso_name` are populated by the canister at response
+  // time via `openid::generic::sso_fields_for(iss, aud)`. Candid `opt
+  // text` surfaces on the TS side as `[] | [string]`, hence the `[0]`
+  // unwrap.
+  const ssoDomain = $derived(openid.sso_domain[0]);
+  const ssoName = $derived(openid.sso_name[0]);
+  // Authoritative SSO marker — set by the canister for credentials
+  // whose `(iss, aud)` resolves to a registered discoverable provider.
+  const isSso = $derived(ssoDomain !== undefined);
+  const name = $derived(
+    openIdName(openid.iss, openid.aud, openid.metadata, ssoName, ssoDomain),
+  );
   const email = $derived(getMetadataString(openid.metadata, "email"));
-  const logo = $derived(openIdLogo(openid.iss, openid.metadata));
+  const logo = $derived(
+    openIdLogo(openid.iss, openid.aud, openid.metadata, ssoDomain),
+  );
+  const displayName = $derived(name ?? $t`SSO`);
   const options = $derived(
     onUnlink !== undefined
       ? [
@@ -33,32 +47,39 @@
 </script>
 
 <div class="mb-3 flex h-9 flex-row items-center">
-  {#if logo !== undefined}
-    <div class="text-fg-primary relative size-6">
+  <div class="text-fg-primary relative size-6">
+    {#if isSso || logo === undefined}
+      <!--
+        SSO credentials render the generic SSO icon. We also fall back
+        to it when `findConfig` returned nothing (direct-provider
+        credentials whose issuer doesn't match any `openid_configs`
+        entry, e.g. after client_id rotation) so `{@html logo}` never
+        stringifies `undefined` into the DOM.
+      -->
+      <SsoIcon class="size-6" />
+    {:else}
+      <!-- eslint-disable-next-line svelte/no-at-html-tags -- logo is a trusted SVG string sourced from the backend canister's openid_configs -->
       {@html logo}
-      {#if isCurrentAccessMethod}
-        <div
-          class="bg-bg-success-secondary border-bg-primary absolute -top-0.25 -right-0.5 size-2.5 rounded-full border-2"
-        ></div>
-      {/if}
-    </div>
-  {/if}
+    {/if}
+    {#if isCurrentAccessMethod}
+      <div
+        class="bg-bg-success-secondary border-bg-primary absolute -top-0.25 -right-0.5 size-2.5 rounded-full border-2"
+      ></div>
+    {/if}
+  </div>
   {#if options.length > 0}
     <Select {options} align="end">
-      <Button
-        variant="tertiary"
-        size="sm"
-        iconOnly
-        class="ms-auto"
+      <button
+        class="btn btn-tertiary btn-sm btn-icon ms-auto"
         aria-label={$t`More options`}
       >
         <EllipsisVerticalIcon class="size-5" />
-      </Button>
+      </button>
     </Select>
   {/if}
 </div>
 <div class="text-text-primary mb-1 text-base font-semibold">
-  {$t`${name} account`}
+  {$t`${displayName} account`}
 </div>
 <div class="text-text-tertiary text-sm">
   {email ?? $t`Hidden email`}
@@ -99,5 +120,5 @@
   </div>
 </div>
 <div class="text-text-primary text-xs">
-  {$t`Sign in with your ${name} account from any device.`}
+  {$t`Sign in with your ${displayName} account from any device.`}
 </div>

@@ -14,6 +14,45 @@ pub const ATTRIBUTE_VALUE_MAX_BYTES: usize = 50_000;
 
 pub const OPENID_ISSUER_MAX_BYTES: usize = 1024;
 
+/// Upper bound on the `<domain>` component of an `sso:<domain>` attribute
+/// scope. 253 mirrors the RFC 1035 DNS name length; we do not require a
+/// fully-qualified DNS name, only a reasonable cap.
+pub const SSO_DOMAIN_MAX_BYTES: usize = 253;
+
+/// Mirror of the frontend's `remapToLegacyDomain`: the frontend rewrites
+/// `https://<sub>.icp0.io` to `https://<sub>.ic0.app` before deriving a
+/// principal so users get the same principal across the two domains. The
+/// canister needs the same transformation to verify that an `unmapped_origin`
+/// supplied alongside the (legacy-mapped) `origin` is just the icp0.io form
+/// of the same site, not a different origin sneaking into the certified
+/// `implicit:origin`.
+///
+/// The accepted shape — `<subdomain>(.raw)?` containing only ASCII word
+/// characters or `-` — matches the regex `^https://([\w-]+(?:\.raw)?)\.icp0\.io$`
+/// used in the frontend.
+pub fn remap_to_legacy_domain(origin: &str) -> String {
+    const PREFIX: &str = "https://";
+    const ICP0_SUFFIX: &str = ".icp0.io";
+
+    let Some(rest) = origin.strip_prefix(PREFIX) else {
+        return origin.to_string();
+    };
+    let Some(subdomain) = rest.strip_suffix(ICP0_SUFFIX) else {
+        return origin.to_string();
+    };
+
+    let base = subdomain.strip_suffix(".raw").unwrap_or(subdomain);
+    let valid = !base.is_empty()
+        && base
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+    if !valid {
+        return origin.to_string();
+    }
+
+    format!("{PREFIX}{subdomain}.ic0.app")
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, CandidType, Serialize)]
 pub enum AttributeName {
     Email,
@@ -58,12 +97,14 @@ impl std::fmt::Display for AttributeName {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, CandidType, Serialize)]
 pub enum AttributeScope {
     OpenId { issuer: String },
+    Sso { domain: String },
 }
 
 impl std::fmt::Display for AttributeScope {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             AttributeScope::OpenId { issuer } => write!(f, "openid:{}", issuer),
+            AttributeScope::Sso { domain } => write!(f, "sso:{}", domain),
         }
     }
 }
@@ -147,12 +188,56 @@ fn validate_openid_credential_issuer_identifier(issuer: &str) -> Result<(), Stri
     Ok(())
 }
 
+/// Format-only validation for the `<domain>` component of an `sso:<domain>`
+/// attribute scope. Intentionally not coupled to the SSO canary allowlist
+/// (`allowed_discovery_domains()` in the canister): a credential whose SSO
+/// domain is no longer allowed should still be parseable, and the scope
+/// parser has no access to canister runtime state anyway. A scope that does
+/// not match any registered SSO provider simply yields no attributes.
+///
+/// Colons are permitted so that `host:port` discovery domains (e.g. the
+/// e2e test domain `localhost:11107`) round-trip through the
+/// `sso:<domain>:<name>` form. Parsing is still unambiguous: the
+/// attribute-key splitter takes the part after the LAST `:` as the
+/// attribute name, and the scope splitter takes the part before the
+/// FIRST `:` as the prefix — anything in between is the domain.
+/// Attribute names themselves are simple identifiers (`name`, `email`,
+/// `verified_email`) and never contain `:`, so the rsplit is always
+/// well-defined.
+fn validate_sso_domain(domain: &str) -> Result<(), String> {
+    let mut problems = vec![];
+
+    if domain.is_empty() {
+        problems.push("empty domain".to_string());
+    }
+
+    if domain.len() > SSO_DOMAIN_MAX_BYTES {
+        problems.push(format!(
+            "must not exceed {} bytes (got {} bytes)",
+            SSO_DOMAIN_MAX_BYTES,
+            domain.len(),
+        ));
+    }
+
+    if domain.chars().any(|c| c.is_whitespace()) {
+        problems.push("must not contain whitespace".to_string());
+    }
+
+    if !problems.is_empty() {
+        return Err(problems.join(", "));
+    }
+
+    Ok(())
+}
+
 impl TryFrom<&str> for AttributeScope {
     type Error = String;
 
     /// Parses an attribute scope string by splitting on the first `':'`.
     ///
-    /// Currently, only scopes of the form `openid:<issuer>` are supported.
+    /// Supported forms:
+    /// - `openid:<issuer>`  (e.g. `openid:https://accounts.google.com`)
+    /// - `sso:<domain>`     (e.g. `sso:dfinity.org`)
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         let mut parts = value.splitn(2, ':');
 
@@ -177,6 +262,29 @@ impl TryFrom<&str> for AttributeScope {
 
                 Ok(AttributeScope::OpenId { issuer })
             }
+            "sso" => {
+                let domain = parts
+                    .next()
+                    .ok_or_else(|| format!("Missing domain in attribute scope: {}", value))?
+                    .to_string();
+
+                validate_sso_domain(&domain).map_err(|err| {
+                    format!(
+                        "Invalid domain `{}` in attribute scope: {}",
+                        ellipsized(&domain, SSO_DOMAIN_MAX_BYTES),
+                        err
+                    )
+                })?;
+
+                // SSO domains are DNS hostnames — normalize to lowercase so
+                // `sso:DFINITY.ORG:email` and `sso:dfinity.org:email` match
+                // the same credential. This also aligns with
+                // `openid::generic::is_allowed_discovery_domain`, which
+                // already compares case-insensitively.
+                let domain = domain.to_ascii_lowercase();
+
+                Ok(AttributeScope::Sso { domain })
+            }
             _ => Err(format!("Unknown attribute scope: {}", scope_str)),
         }
     }
@@ -184,7 +292,8 @@ impl TryFrom<&str> for AttributeScope {
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, CandidType, Serialize)]
 pub struct AttributeKey {
-    /// E.g., `Some("openid:https://google.com")` in "openid:https://google.com:email" or `None` in "name".
+    /// E.g., `Some("openid:https://google.com")` in `"openid:https://google.com:email"`,
+    /// `Some("sso:dfinity.org")` in `"sso:dfinity.org:email"`, or `None` in `"name"`.
     pub scope: Option<AttributeScope>,
 
     /// E.g., "email", "name"
@@ -239,6 +348,17 @@ pub struct ValidatedPrepareAttributeRequest {
     pub attribute_keys: BTreeMap<Option<AttributeScope>, BTreeSet<AttributeName>>,
 }
 
+/// Problem message appended by the legacy attribute-sharing validators when a
+/// request carries an `sso:<domain>` scoped key.
+///
+/// The legacy flow (`prepare_attributes`, `get_attributes`,
+/// `list_available_attributes`) is deprecated and will not gain new
+/// functionality. All `sso:<domain>` attribute requests must go through the
+/// ICRC-3 flow (`prepare_icrc3_attributes` / `get_icrc3_attributes`) instead.
+pub const LEGACY_SSO_SCOPE_REJECTION: &str =
+    "sso:<domain> attribute scope is not supported by the legacy attribute-sharing flow; \
+     use the ICRC-3 attribute flow (prepare_icrc3_attributes / get_icrc3_attributes) instead";
+
 impl TryFrom<PrepareAttributeRequest> for ValidatedPrepareAttributeRequest {
     type Error = PrepareAttributeError;
 
@@ -281,6 +401,10 @@ impl TryFrom<PrepareAttributeRequest> for ValidatedPrepareAttributeRequest {
                     continue;
                 }
             };
+            if matches!(scope, Some(AttributeScope::Sso { .. })) {
+                problems.push(LEGACY_SSO_SCOPE_REJECTION.to_string());
+                continue;
+            }
             attribute_keys
                 .entry(scope)
                 .or_insert_with(BTreeSet::new)
@@ -396,6 +520,10 @@ impl TryFrom<GetAttributesRequest> for ValidatedGetAttributesRequest {
                     continue;
                 }
             };
+            if matches!(attribute.key.scope, Some(AttributeScope::Sso { .. })) {
+                problems.push(LEGACY_SSO_SCOPE_REJECTION.to_string());
+                continue;
+            }
             attributes
                 .entry(attribute.key.scope.clone())
                 .or_insert_with(BTreeSet::new)
@@ -512,6 +640,12 @@ pub const ICRC3_NONCE_BYTES: usize = 32;
 pub struct PrepareIcrc3AttributeRequest {
     pub identity_number: AnchorNumber,
     pub origin: FrontendHostname,
+    /// The relying party's actual origin, before the legacy `icp0.io → ic0.app`
+    /// remap that `origin` may have gone through for principal stability. When
+    /// provided, this value is what gets certified as `implicit:origin`. The
+    /// canister verifies that mapping `unmapped_origin` through the same legacy
+    /// remap yields `origin`, so an RP can't certify an arbitrary value here.
+    pub unmapped_origin: Option<FrontendHostname>,
     pub account_number: Option<AccountNumber>,
     pub attributes: Vec<AttributeSpec>,
     pub nonce: Vec<u8>,
@@ -521,6 +655,7 @@ pub struct PrepareIcrc3AttributeRequest {
 pub struct ValidatedPrepareIcrc3AttributeRequest {
     pub identity_number: AnchorNumber,
     pub origin: FrontendHostname,
+    pub unmapped_origin: Option<FrontendHostname>,
     pub account_number: Option<AccountNumber>,
     pub attributes: Vec<ValidatedAttributeSpec>,
     pub nonce: Vec<u8>,
@@ -533,6 +668,7 @@ impl TryFrom<PrepareIcrc3AttributeRequest> for ValidatedPrepareIcrc3AttributeReq
         let PrepareIcrc3AttributeRequest {
             identity_number,
             origin,
+            unmapped_origin,
             account_number,
             attributes: unparsed_attributes,
             nonce,
@@ -554,6 +690,21 @@ impl TryFrom<PrepareIcrc3AttributeRequest> for ValidatedPrepareIcrc3AttributeReq
                 origin.len(),
                 FRONTEND_HOSTNAME_MAX_BYTES
             ));
+        }
+
+        if let Some(ref unmapped) = unmapped_origin {
+            if unmapped.len() > FRONTEND_HOSTNAME_MAX_BYTES {
+                problems.push(format!(
+                    "Unmapped origin length {} exceeds limit of {} bytes",
+                    unmapped.len(),
+                    FRONTEND_HOSTNAME_MAX_BYTES
+                ));
+            } else if remap_to_legacy_domain(unmapped) != origin {
+                problems.push(format!(
+                    "Unmapped origin {} is not related to origin {}",
+                    unmapped, origin
+                ));
+            }
         }
 
         if unparsed_attributes.len() > MAX_ATTRIBUTES_PER_REQUEST {
@@ -600,6 +751,7 @@ impl TryFrom<PrepareIcrc3AttributeRequest> for ValidatedPrepareIcrc3AttributeReq
         Ok(Self {
             identity_number,
             origin,
+            unmapped_origin,
             account_number,
             attributes,
             nonce,
@@ -724,7 +876,13 @@ impl TryFrom<ListAvailableAttributesRequest> for ValidatedListAvailableAttribute
                 let mut parsed = Vec::with_capacity(keys.len().min(MAX_ATTRIBUTES_PER_REQUEST));
                 for key in keys {
                     match AttributeKey::try_from(key) {
-                        Ok(k) => parsed.push(k),
+                        Ok(k) => {
+                            if matches!(k.scope, Some(AttributeScope::Sso { .. })) {
+                                problems.push(LEGACY_SSO_SCOPE_REJECTION.to_string());
+                                continue;
+                            }
+                            parsed.push(k);
+                        }
                         Err(e) => problems.push(e),
                     }
                 }
@@ -1007,11 +1165,117 @@ mod tests {
         }
 
         #[test]
+        fn test_attribute_scope_sso_conversions() {
+            let max_length_domain = "a".repeat(SSO_DOMAIN_MAX_BYTES);
+            let max_length_input = format!("sso:{}", max_length_domain);
+
+            let too_long_domain = "a".repeat(SSO_DOMAIN_MAX_BYTES + 1);
+            let too_long_input = format!("sso:{}", too_long_domain);
+            let too_long_error = format!(
+                "Invalid domain `{}...` in attribute scope: must not exceed 253 bytes (got 254 bytes)",
+                &too_long_domain[..SSO_DOMAIN_MAX_BYTES - "...".len()],
+            );
+
+            let test_cases: Vec<(&str, &str, Result<AttributeScope, String>)> = vec![
+                (
+                    "sso basic",
+                    "sso:dfinity.org",
+                    Ok(AttributeScope::Sso {
+                        domain: "dfinity.org".to_string(),
+                    }),
+                ),
+                (
+                    "sso beta",
+                    "sso:beta.dfinity.org",
+                    Ok(AttributeScope::Sso {
+                        domain: "beta.dfinity.org".to_string(),
+                    }),
+                ),
+                (
+                    "sso subdomain",
+                    "sso:accounts.dfinity.org",
+                    Ok(AttributeScope::Sso {
+                        domain: "accounts.dfinity.org".to_string(),
+                    }),
+                ),
+                (
+                    // DNS hostnames are case-insensitive; the parser
+                    // normalizes to lowercase so `sso:DFINITY.ORG` and
+                    // `sso:dfinity.org` match the same credential.
+                    "sso uppercase normalizes to lowercase",
+                    "sso:DFINITY.ORG",
+                    Ok(AttributeScope::Sso {
+                        domain: "dfinity.org".to_string(),
+                    }),
+                ),
+                (
+                    "sso mixed case normalizes to lowercase",
+                    "sso:Beta.DFinity.Org",
+                    Ok(AttributeScope::Sso {
+                        domain: "beta.dfinity.org".to_string(),
+                    }),
+                ),
+                (
+                    "sso missing domain",
+                    "sso:",
+                    Err("Invalid domain `` in attribute scope: empty domain".to_string()),
+                ),
+                (
+                    "sso no colon",
+                    "sso",
+                    Err("Missing domain in attribute scope: sso".to_string()),
+                ),
+                (
+                    "sso with whitespace",
+                    "sso:bad domain",
+                    Err(
+                        "Invalid domain `bad domain` in attribute scope: must not contain whitespace"
+                            .to_string(),
+                    ),
+                ),
+                (
+                    // `host:port` discovery domains (e.g. e2e tests pointed
+                    // at `localhost:11107`) round-trip through the scope
+                    // form. The parser splits on the FIRST `:` for the
+                    // prefix and on the LAST `:` for the attribute name —
+                    // anything in between is the domain.
+                    "sso with port",
+                    "sso:localhost:11107",
+                    Ok(AttributeScope::Sso {
+                        domain: "localhost:11107".to_string(),
+                    }),
+                ),
+                (
+                    "sso at max length",
+                    &max_length_input,
+                    Ok(AttributeScope::Sso {
+                        domain: max_length_domain.clone(),
+                    }),
+                ),
+                (
+                    "sso exceeds max length",
+                    &too_long_input,
+                    Err(too_long_error.clone()),
+                ),
+            ];
+
+            for (label, input, expected) in test_cases {
+                let result = AttributeScope::try_from(input);
+                pretty_assert_eq!(result, expected, "Failed test case: {}", label);
+            }
+        }
+
+        #[test]
         fn test_attribute_scope_display() {
             let scope = AttributeScope::OpenId {
                 issuer: "https://google.com".to_string(),
             };
             pretty_assert_eq!(scope.to_string(), "openid:https://google.com");
+
+            let sso = AttributeScope::Sso {
+                domain: "dfinity.org".to_string(),
+            };
+            pretty_assert_eq!(sso.to_string(), "sso:dfinity.org");
         }
 
         #[test]
@@ -1080,6 +1344,43 @@ mod tests {
                     "invalid scope",
                     "unknown:https://issuer:email",
                     Err("Unknown attribute scope: unknown".to_string()),
+                ),
+                (
+                    "sso scope with email",
+                    "sso:dfinity.org:email",
+                    Ok(AttributeKey {
+                        scope: Some(AttributeScope::Sso {
+                            domain: "dfinity.org".to_string(),
+                        }),
+                        attribute_name: AttributeName::Email,
+                    }),
+                ),
+                (
+                    "sso scope with name",
+                    "sso:dfinity.org:name",
+                    Ok(AttributeKey {
+                        scope: Some(AttributeScope::Sso {
+                            domain: "dfinity.org".to_string(),
+                        }),
+                        attribute_name: AttributeName::Name,
+                    }),
+                ),
+                (
+                    // verified_email under sso: parses fine — it is silently
+                    // dropped downstream by prepare_sso_attributes.
+                    "sso scope with verified_email parses",
+                    "sso:dfinity.org:verified_email",
+                    Ok(AttributeKey {
+                        scope: Some(AttributeScope::Sso {
+                            domain: "dfinity.org".to_string(),
+                        }),
+                        attribute_name: AttributeName::VerifiedEmail,
+                    }),
+                ),
+                (
+                    "sso scope with invalid attribute",
+                    "sso:dfinity.org:bogus",
+                    Err("Unknown attribute: bogus".to_string()),
                 ),
                 ("empty", "", Err("Unknown attribute: ".to_string())),
             ];
@@ -1305,6 +1606,20 @@ mod tests {
                         MAX_ATTRIBUTES_PER_REQUEST
                     )],
                 ),
+                (
+                    "sso scope rejected by legacy flow",
+                    GetAttributesRequest {
+                        identity_number: 444,
+                        origin: "example.com".to_string(),
+                        account_number: None,
+                        issued_at_timestamp_ns: 4,
+                        attributes: vec![(
+                            "sso:dfinity.org:email".to_string(),
+                            b"user@dfinity.org".to_vec(),
+                        )],
+                    },
+                    vec![LEGACY_SSO_SCOPE_REJECTION.to_string()],
+                ),
             ];
 
             for (label, input, expected_problems) in test_cases {
@@ -1519,6 +1834,18 @@ mod tests {
                     },
                     vec!["Unknown attribute: invalid".to_string()],
                 ),
+                (
+                    // The legacy flow rejects sso: scopes; they must go
+                    // through the ICRC-3 flow instead.
+                    "sso scope rejected by legacy flow",
+                    PrepareAttributeRequest {
+                        identity_number: 12345,
+                        origin: "example.com".to_string(),
+                        account_number: None,
+                        attribute_keys: vec!["sso:dfinity.org:email".to_string()],
+                    },
+                    vec![LEGACY_SSO_SCOPE_REJECTION.to_string()],
+                ),
             ];
 
             for (label, input, expected_problems) in test_cases {
@@ -1559,6 +1886,7 @@ mod tests {
                         identity_number: 123,
                         origin: "example.com".to_string(),
                         account_number: None,
+                        unmapped_origin: None,
                         attributes: vec![make_spec(
                             "openid:https://google.com:email",
                             Some(b"user@example.com"),
@@ -1574,6 +1902,7 @@ mod tests {
                         identity_number: 123,
                         origin: "example.com".to_string(),
                         account_number: None,
+                        unmapped_origin: None,
                         attributes: vec![make_spec("openid:https://google.com:email", None, false)],
                         nonce: vec![0u8; 32],
                     },
@@ -1585,6 +1914,7 @@ mod tests {
                         identity_number: 123,
                         origin: "example.com".to_string(),
                         account_number: None,
+                        unmapped_origin: None,
                         attributes: vec![make_spec("openid:https://google.com:email", None, true)],
                         nonce: vec![0u8; 32],
                     },
@@ -1596,6 +1926,7 @@ mod tests {
                         identity_number: 123,
                         origin: "example.com".to_string(),
                         account_number: Some(42),
+                        unmapped_origin: None,
                         attributes: vec![
                             make_spec(
                                 "openid:https://google.com:email",
@@ -1614,6 +1945,7 @@ mod tests {
                         identity_number: 123,
                         origin: "example.com".to_string(),
                         account_number: None,
+                        unmapped_origin: None,
                         attributes: vec![],
                         nonce: vec![0u8; 32],
                     },
@@ -1639,6 +1971,7 @@ mod tests {
                 identity_number: 123,
                 origin: "example.com".to_string(),
                 account_number: None,
+                unmapped_origin: None,
                 attributes: vec![
                     make_spec("openid:https://google.com:email", None, true),
                     make_spec("openid:https://google.com:name", None, false),
@@ -1656,6 +1989,7 @@ mod tests {
                 identity_number: 123,
                 origin: "example.com".to_string(),
                 account_number: None,
+                unmapped_origin: None,
                 attributes: vec![
                     make_spec(
                         "openid:https://google.com:email",
@@ -1686,6 +2020,7 @@ mod tests {
                         identity_number: 123,
                         origin: long_origin.clone(),
                         account_number: None,
+                        unmapped_origin: None,
                         attributes: vec![],
                         nonce: vec![0u8; 32],
                     },
@@ -1701,6 +2036,7 @@ mod tests {
                         identity_number: 123,
                         origin: "example.com".to_string(),
                         account_number: None,
+                        unmapped_origin: None,
                         attributes: (0..=MAX_ATTRIBUTES_PER_REQUEST)
                             .map(|_| make_spec("openid:https://google.com:email", None, false))
                             .collect(),
@@ -1718,6 +2054,7 @@ mod tests {
                         identity_number: 123,
                         origin: "example.com".to_string(),
                         account_number: None,
+                        unmapped_origin: None,
                         attributes: vec![make_spec("invalid_key", None, false)],
                         nonce: vec![0u8; 32],
                     },
@@ -1729,6 +2066,7 @@ mod tests {
                         identity_number: 123,
                         origin: "example.com".to_string(),
                         account_number: None,
+                        unmapped_origin: None,
                         attributes: vec![AttributeSpec {
                             key: "openid:https://google.com:email".to_string(),
                             value: Some(long_value.clone()),
@@ -1748,6 +2086,7 @@ mod tests {
                         identity_number: 123,
                         origin: long_origin.clone(),
                         account_number: None,
+                        unmapped_origin: None,
                         attributes: vec![make_spec("bad_key", None, false)],
                         nonce: vec![0u8; 32],
                     },
@@ -1784,6 +2123,156 @@ mod tests {
                     other => panic!("Expected validation error for {}, got {:?}", label, other),
                 }
             }
+        }
+
+        #[test]
+        fn test_unmapped_origin_accepted_when_remap_matches_origin() {
+            let request = PrepareIcrc3AttributeRequest {
+                identity_number: 123,
+                origin: "https://foo.ic0.app".to_string(),
+                unmapped_origin: Some("https://foo.icp0.io".to_string()),
+                account_number: None,
+                attributes: vec![],
+                nonce: vec![0u8; 32],
+            };
+            let validated =
+                ValidatedPrepareIcrc3AttributeRequest::try_from(request).expect("should validate");
+            pretty_assert_eq!(
+                validated.unmapped_origin,
+                Some("https://foo.icp0.io".to_string())
+            );
+        }
+
+        #[test]
+        fn test_unmapped_origin_accepted_when_equal_to_origin() {
+            // For non-icp0.io origins, the frontend's remap is a no-op, so
+            // `unmapped_origin == origin` is the expected case.
+            let request = PrepareIcrc3AttributeRequest {
+                identity_number: 123,
+                origin: "https://example.com".to_string(),
+                unmapped_origin: Some("https://example.com".to_string()),
+                account_number: None,
+                attributes: vec![],
+                nonce: vec![0u8; 32],
+            };
+            ValidatedPrepareIcrc3AttributeRequest::try_from(request).expect("should validate");
+        }
+
+        #[test]
+        fn test_unmapped_origin_rejected_when_unrelated_to_origin() {
+            let request = PrepareIcrc3AttributeRequest {
+                identity_number: 123,
+                origin: "https://foo.ic0.app".to_string(),
+                unmapped_origin: Some("https://evil.com".to_string()),
+                account_number: None,
+                attributes: vec![],
+                nonce: vec![0u8; 32],
+            };
+            let err = ValidatedPrepareIcrc3AttributeRequest::try_from(request).unwrap_err();
+            match err {
+                PrepareIcrc3AttributeError::ValidationError { problems } => {
+                    assert!(
+                        problems.iter().any(|p| p.contains("not related to origin")),
+                        "expected 'not related to origin' problem, got {:?}",
+                        problems
+                    );
+                }
+                other => panic!("Expected ValidationError, got {:?}", other),
+            }
+        }
+
+        #[test]
+        fn test_unmapped_origin_too_long_rejected() {
+            let long = format!("https://{}.com", "x".repeat(FRONTEND_HOSTNAME_MAX_BYTES));
+            let request = PrepareIcrc3AttributeRequest {
+                identity_number: 123,
+                origin: "https://example.com".to_string(),
+                unmapped_origin: Some(long.clone()),
+                account_number: None,
+                attributes: vec![],
+                nonce: vec![0u8; 32],
+            };
+            let err = ValidatedPrepareIcrc3AttributeRequest::try_from(request).unwrap_err();
+            match err {
+                PrepareIcrc3AttributeError::ValidationError { problems } => {
+                    assert!(
+                        problems
+                            .iter()
+                            .any(|p| p.contains("Unmapped origin length")),
+                        "expected length problem, got {:?}",
+                        problems
+                    );
+                }
+                other => panic!("Expected ValidationError, got {:?}", other),
+            }
+        }
+
+        #[test]
+        fn test_unmapped_origin_none_is_accepted() {
+            let request = PrepareIcrc3AttributeRequest {
+                identity_number: 123,
+                origin: "https://foo.ic0.app".to_string(),
+                unmapped_origin: None,
+                account_number: None,
+                attributes: vec![],
+                nonce: vec![0u8; 32],
+            };
+            let validated =
+                ValidatedPrepareIcrc3AttributeRequest::try_from(request).expect("should validate");
+            assert!(validated.unmapped_origin.is_none());
+        }
+    }
+
+    mod remap_to_legacy_domain_tests {
+        use super::*;
+
+        #[test]
+        fn maps_icp0_io_subdomain_to_ic0_app() {
+            pretty_assert_eq!(
+                remap_to_legacy_domain("https://foo.icp0.io"),
+                "https://foo.ic0.app"
+            );
+        }
+
+        #[test]
+        fn maps_raw_subdomain() {
+            pretty_assert_eq!(
+                remap_to_legacy_domain("https://foo.raw.icp0.io"),
+                "https://foo.raw.ic0.app"
+            );
+        }
+
+        #[test]
+        fn allows_underscore_and_hyphen_in_subdomain() {
+            pretty_assert_eq!(
+                remap_to_legacy_domain("https://my-app_1.icp0.io"),
+                "https://my-app_1.ic0.app"
+            );
+        }
+
+        #[test]
+        fn leaves_non_icp0_origin_unchanged() {
+            pretty_assert_eq!(
+                remap_to_legacy_domain("https://example.com"),
+                "https://example.com"
+            );
+        }
+
+        #[test]
+        fn rejects_extra_subdomain_levels() {
+            // `foo.bar` is not `[\w-]+(?:\.raw)?`, so the input passes through.
+            pretty_assert_eq!(
+                remap_to_legacy_domain("https://foo.bar.icp0.io"),
+                "https://foo.bar.icp0.io"
+            );
+        }
+
+        #[test]
+        fn rejects_http_scheme() {
+            pretty_assert_eq!(
+                remap_to_legacy_domain("http://foo.icp0.io"),
+                "http://foo.icp0.io"
+            );
         }
     }
 
@@ -1972,6 +2461,19 @@ mod tests {
             match err {
                 ListAvailableAttributesError::ValidationError { problems } => {
                     assert!(problems[0].contains("Unknown attribute"));
+                }
+                other => panic!("Expected ValidationError, got {:?}", other),
+            }
+
+            // sso: scope is rejected by the legacy flow.
+            let req = ListAvailableAttributesRequest {
+                identity_number: 10000,
+                attributes: Some(vec!["sso:dfinity.org:email".to_string()]),
+            };
+            let err = ValidatedListAvailableAttributesRequest::try_from(req).unwrap_err();
+            match err {
+                ListAvailableAttributesError::ValidationError { problems } => {
+                    pretty_assert_eq!(problems, vec![LEGACY_SSO_SCOPE_REJECTION.to_string()]);
                 }
                 other => panic!("Expected ValidationError, got {:?}", other),
             }

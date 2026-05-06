@@ -381,6 +381,12 @@ type InternetIdentityInit = record {
     native_oidc_clients : opt vec NativeOidcClientConfig;
     // Trusted issuer origin used by native OIDC discovery and signed tokens
     native_oidc_issuer_origin : opt text;
+    // Allowlist of domains that may be registered as discoverable SSO
+    // providers via `add_discoverable_oidc_config`. When set, fully replaces
+    // the built-in defaults. When unset, falls back to `dfinity.org`
+    // (production) or `beta.dfinity.org` (everything else), keyed off
+    // `is_production`.
+    sso_discoverable_domains : opt vec text;
     // Configuration for Web Analytics
     analytics_config : opt opt AnalyticsConfig;
     // Configuration to show dapps explorer or not
@@ -501,7 +507,24 @@ type NativeOidcClientConfig = record {
     require_pkce : bool;
 };
 
-type OpenIdCredentialKey = record { Iss; Sub };
+// SSO provider config that uses two-hop discovery.
+// The backend fetches https://{discovery_domain}/.well-known/ii-openid-configuration
+// for { client_id, openid_configuration } and then fetches the standard OIDC
+// discovery at openid_configuration for { issuer, jwks_uri }.
+type DiscoverableOidcConfig = record {
+    discovery_domain : text;
+};
+
+// Resolved SSO provider state.
+// All fields other than discovery_domain are None until discovery completes.
+type OidcConfig = record {
+    discovery_domain : text;
+    client_id : opt text;
+    openid_configuration : opt text;
+    issuer : opt text;
+};
+
+type OpenIdCredentialKey = record { Iss; Sub; Aud };
 
 type AnalyticsConfig = variant {
     Plausible : record {
@@ -518,6 +541,16 @@ type OpenIdCredential = record {
     aud : Aud;
     last_usage_timestamp : opt Timestamp;
     metadata : MetadataMapV2;
+    // SSO discovery domain, looked up by `(iss, aud)` against the
+    // canister's registered discoverable OIDC configs. `None` for
+    // direct-provider credentials (Google / Apple / Microsoft) and for
+    // SSO credentials whose provider is no longer registered.
+    sso_domain : opt text;
+    // Human-readable SSO name from the domain's
+    // `/.well-known/ii-openid-configuration`. `None` when the domain
+    // doesn't publish one — callers should fall back to `sso_domain`
+    // for the label.
+    sso_name : opt text;
 };
 
 type OpenIdCredentialAddError = variant {
@@ -968,7 +1001,17 @@ type PrepareAttributeRequest = record {
     // II account for the relying party.
     account_number : opt AccountNumber;
 
-    // The attribute to be prepared.
+    // The attributes to be prepared. Each key has the form
+    // `<scope>:<attribute_name>`, where `<scope>` is either
+    // `openid:<issuer>` (e.g. `openid:https://accounts.google.com:email`)
+    // or `sso:<domain>` (e.g. `sso:dfinity.org:email`).
+    //
+    // Each linked credential is addressable via exactly one scope:
+    // credentials obtained through a `DiscoverableOidcConfig` (two-hop SSO
+    // discovery) are reachable only via `sso:<domain>`; credentials from
+    // hardcoded OIDC providers (Google, Microsoft, …) are reachable only via
+    // `openid:<issuer>`. Under `sso:` only `email` and `name` are supported;
+    // under `openid:` `email`, `name`, and `verified_email` are supported.
     attribute_keys : vec text;
 };
 
@@ -1046,9 +1089,12 @@ type Icrc3Value = variant {
 
 // A specification of an attribute to be certified.
 type AttributeSpec = record {
-    // `attribute_scope:attribute_name`
+    // `<attribute_scope>:<attribute_name>` where `<attribute_scope>` is
+    // either `openid:<issuer>` or `sso:<domain>`.
     //
-    // Example: `openid:https://accounts.google.com:email`
+    // Examples:
+    // - `openid:https://accounts.google.com:email`
+    // - `sso:dfinity.org:email`
     key : text;
 
     // If `value` is set, this attribute should be certified only if it matches
@@ -1071,8 +1117,19 @@ type PrepareIcrc3AttributeRequest = record {
     // Identity for which the attributes should be prepared.
     identity_number : IdentityNumber;
 
-    // Origin of the relying party in the attribute sharing flow.
+    // Origin of the relying party in the attribute sharing flow. May have
+    // been remapped from `<sub>.icp0.io` to `<sub>.ic0.app` for principal
+    // stability — see `unmapped_origin`.
     origin : FrontendHostname;
+
+    // The relying party's actual origin, before the legacy `icp0.io →
+    // ic0.app` remap that `origin` may have gone through. When set, this
+    // value is what gets certified as `implicit:origin` instead of `origin`,
+    // so that an RP signed in via the icp0.io domain sees its real origin
+    // in the certified message. The canister verifies that mapping
+    // `unmapped_origin` through the same legacy remap yields `origin`,
+    // so an RP can't certify an arbitrary value here.
+    unmapped_origin : opt FrontendHostname;
 
     // II account for the relying party.
     account_number : opt AccountNumber;
@@ -1137,8 +1194,10 @@ type ListAvailableAttributesRequest = record {
     identity_number : IdentityNumber;
 
     // Optional list of attribute keys to filter by.
-    // Each key is either a fully-scoped key (e.g., "openid:https://accounts.google.com:email")
-    // or an unscoped attribute name (e.g., "email") which matches all scopes.
+    // Each key is either a fully-scoped key (e.g.,
+    // `"openid:https://accounts.google.com:email"` or
+    // `"sso:dfinity.org:email"`) or an unscoped attribute name (e.g.,
+    // `"email"`) which matches all scopes.
     // If not provided, all available attributes are returned.
     attributes : opt vec text;
 };
@@ -1311,11 +1370,17 @@ service : (opt InternetIdentityInit) -> {
     http_request : (request : HttpRequest) -> (HttpResponse) query;
     http_request_update : (request : HttpRequest) -> (HttpResponse);
 
+    // OIDC Discovery
+    // ===============
+    discovered_oidc_configs : () -> (vec OidcConfig) query;
+    add_discoverable_oidc_config : (DiscoverableOidcConfig) -> ();
+
     // Internal Methods
     // ================
     init_salt : () -> ();
     stats : () -> (InternetIdentityStats) query;
     config : () -> (InternetIdentityInit) query;
+    whoami : () -> (principal) query;
 
     deploy_archive : (wasm : blob) -> (DeployArchiveResult);
     // Returns a batch of entries _sorted by sequence number_ to be archived.

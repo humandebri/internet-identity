@@ -1,0 +1,43 @@
+# yaml-language-server: $schema=https://github.com/dfinity/icp-cli/raw/refs/tags/v0.2.0/docs/schemas/icp-yaml-schema.json
+
+canisters:
+  - name: internet_identity_frontend
+    build:
+      steps:
+        - type: script
+          commands:
+            - "scripts/render-local-init-args"
+            - "II_FETCH_ROOT_KEY=1 scripts/build --frontend"
+            - "cp internet_identity_frontend.wasm.gz \"$ICP_WASM_OUTPUT_PATH\""
+    init_args:
+      path: .icp/cache/init-args/internet_identity_frontend.did
+
+  - name: internet_identity
+    build:
+      steps:
+        - type: script
+          commands:
+            - "II_FETCH_ROOT_KEY=1 scripts/build"
+            - "cp internet_identity.wasm.gz \"$ICP_WASM_OUTPUT_PATH\""
+    init_args:
+      path: src/internet_identity/local_test_arg.did
+
+  - name: test_app
+    build:
+      steps:
+        - type: script
+          commands:
+            - "demos/test-app/build.sh"
+            - "cp demos/test-app/test_app.wasm \"$ICP_WASM_OUTPUT_PATH\""
+
+  - name: issuer
+    build:
+      steps:
+        - type: script
+          commands:
+            - "demos/vc_issuer/build.sh"
+            - "cp demos/vc_issuer/vc_demo_issuer.wasm.gz \"$ICP_WASM_OUTPUT_PATH\""
+    sync:
+      steps:
+        - type: script
+          command: "demos/vc_issuer/provision"

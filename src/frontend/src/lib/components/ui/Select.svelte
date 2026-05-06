@@ -2,7 +2,6 @@
   import type { Component } from "svelte";
   import type { HTMLAttributes } from "svelte/elements";
   import Popover from "$lib/components/ui/Popover.svelte";
-  import Button from "$lib/components/ui/Button.svelte";
   import Tooltip from "./Tooltip.svelte";
 
   type Option<T> = {
@@ -74,20 +73,20 @@
     class={["!w-max p-1.5 !shadow-lg", className]}
   >
     <div class="flex flex-col" role="menu">
-      {#each options as option, index}
+      {#each options as option, index (index)}
         <Tooltip
           label={option.tooltip ?? ""}
           hidden={option.tooltip === undefined ? true : undefined}
           direction="left"
           distance="0.9rem"
         >
-          <Button
-            onclick={() => handleClick(option, index)}
-            variant="tertiary"
+          <button
             class={[
-              "justify-start gap-2.5 !px-3 text-start",
-              option.selected && "[ul:not(:hover)_&]:bg-bg-primary_hover",
+              "btn btn-tertiary justify-start gap-2.5 !px-3 text-start",
+              option.selected === true &&
+                "[ul:not(:hover)_&]:bg-bg-primary_hover",
             ]}
+            onclick={() => handleClick(option, index)}
             role="menuitem"
             aria-label={option.label}
             disabled={option.disabled}
@@ -101,7 +100,7 @@
               </div>
             {/if}
             <span>{option.label}</span>
-          </Button>
+          </button>
         </Tooltip>
       {/each}
     </div>

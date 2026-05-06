@@ -40,6 +40,23 @@ provider.use(async (ctx, next) => {
   await next();
 });
 
+// Allow the II frontend (https://id.ai in e2e, http://localhost:5173 in
+// dev) to fetch the SSO discovery + OIDC discovery endpoints from the
+// browser. Without this the cross-origin GETs fail silently and SSO
+// sign-in stalls with the wizard's Continue button stuck disabled.
+// `*` matches our test/dev origins; production deployments wouldn't run
+// this server.
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  if (req.method === "OPTIONS") {
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    res.status(204).end();
+    return;
+  }
+  next();
+});
+
 // Bypass http and localhost restrictions: https://github.com/panva/node-oidc-provider/discussions/1301
 const { invalidate: orig } = provider.Client.Schema.prototype;
 provider.Client.Schema.prototype.invalidate = function invalidate(
@@ -59,10 +76,25 @@ app.post("/account/:id/claims", express.json(), async (req, res) => {
   res.status(201).send();
 });
 
+// Endpoint for SSO discoverability
+app.get("/.well-known/ii-openid-configuration", (req, res) => {
+  res.status(200).json({
+    client_id: "internet_identity",
+    openid_configuration: `http://localhost:${port}/.well-known/openid-configuration`,
+    // Optional human-readable SSO name. Surfaced in the II consent
+    // screen as `<name> email:` etc., so e2e tests can verify the
+    // prefix branch instead of the bare-domain fallback.
+    name: `Test SSO ${port}`
+  });
+});
+
 // Register provider and start server
 app.use(provider.callback());
 app.listen(port, () => {
   console.log(
     `For endpoints see: http://localhost:${port}/.well-known/openid-configuration`,
+  );
+  console.log(
+    `For SSO discovery see: http://localhost:${port}/.well-known/ii-openid-configuration`,
   );
 });

@@ -20,6 +20,7 @@
     openid_configs: [],
     native_oidc_clients: [],
     native_oidc_issuer_origin: [],
+    sso_discoverable_domains: [],
     backend_origin: [frontendCanisterConfig.backend_origin],
     captcha_config: [],
     dummy_auth: [],

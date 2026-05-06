@@ -2,6 +2,9 @@ name: Frontend checks and lints
 
 on:
   push:
+    branches: [main]
+  pull_request:
+  merge_group:
 
 jobs:
   frontend-checks:
@@ -10,7 +13,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           # set a PAT so that add-and-commit can trigger CI runs
-          token: ${{ secrets.GIX_BOT_PAT }}
+          token: ${{ secrets.GIX_BOT_PAT || github.token }}
       - uses: ./.github/actions/setup-node
       - run: npm ci
       - name: Run tsc
@@ -37,8 +40,9 @@ jobs:
           done < <(jq <src/frontend/src/flows/dappsExplorer/dapps.json -cMr '.[] | .logo' )
       - name: Commit type interfaces
         uses: EndBug/add-and-commit@v9
-        # We don't want to commit automatic changes to main
-        if: ${{ github.ref != 'refs/heads/main' }}
+        # Push only fires on `main` now, so this is inert. Preserved for
+        # reference; re-enable by gating on a suitable event.
+        if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/') && github.ref != 'refs/heads/main' }}
         with:
           add: |
             src/frontend/generated

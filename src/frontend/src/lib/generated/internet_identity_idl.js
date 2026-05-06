@@ -31,15 +31,15 @@ export const idlFactory = ({ IDL }) => {
     'auth_scope' : IDL.Vec(IDL.Text),
     'client_id' : IDL.Text,
   });
-  const NativeOidcApplicationType = IDL.Variant({ 'native' : IDL.Null });
   const NativeOidcTokenEndpointAuthMethod = IDL.Variant({ 'none' : IDL.Null });
+  const NativeOidcApplicationType = IDL.Variant({ 'native' : IDL.Null });
   const NativeOidcClientConfig = IDL.Record({
-    'client_id' : IDL.Text,
     'redirect_uris' : IDL.Vec(IDL.Text),
     'allowed_origins' : IDL.Vec(IDL.Text),
-    'application_type' : NativeOidcApplicationType,
     'token_endpoint_auth_method' : NativeOidcTokenEndpointAuthMethod,
     'require_pkce' : IDL.Bool,
+    'client_id' : IDL.Text,
+    'application_type' : NativeOidcApplicationType,
   });
   const CaptchaConfig = IDL.Record({
     'max_unsolved_captchas' : IDL.Nat64,
@@ -61,18 +61,19 @@ export const idlFactory = ({ IDL }) => {
     'time_per_token_ns' : IDL.Nat64,
   });
   const InternetIdentityInit = IDL.Record({
+    'native_oidc_issuer_origin' : IDL.Opt(IDL.Text),
     'is_production' : IDL.Opt(IDL.Bool),
     'backend_canister_id' : IDL.Opt(IDL.Principal),
     'enable_dapps_explorer' : IDL.Opt(IDL.Bool),
     'assigned_user_number_range' : IDL.Opt(IDL.Tuple(IDL.Nat64, IDL.Nat64)),
     'new_flow_origins' : IDL.Opt(IDL.Vec(IDL.Text)),
+    'sso_discoverable_domains' : IDL.Opt(IDL.Vec(IDL.Text)),
     'archive_config' : IDL.Opt(ArchiveConfig),
     'canister_creation_cycles_cost' : IDL.Opt(IDL.Nat64),
     'analytics_config' : IDL.Opt(IDL.Opt(AnalyticsConfig)),
     'related_origins' : IDL.Opt(IDL.Vec(IDL.Text)),
     'openid_configs' : IDL.Opt(IDL.Vec(OpenIdConfig)),
     'native_oidc_clients' : IDL.Opt(IDL.Vec(NativeOidcClientConfig)),
-    'native_oidc_issuer_origin' : IDL.Opt(IDL.Text),
     'backend_origin' : IDL.Opt(IDL.Text),
     'captcha_config' : IDL.Opt(CaptchaConfig),
     'dummy_auth' : IDL.Opt(IDL.Opt(DummyAuthConfig)),
@@ -121,6 +122,7 @@ export const idlFactory = ({ IDL }) => {
     'purpose' : Purpose,
     'credential_id' : IDL.Opt(CredentialId),
   });
+  const DiscoverableOidcConfig = IDL.Record({ 'discovery_domain' : IDL.Text });
   const Timestamp = IDL.Nat64;
   const AddTentativeDeviceResponse = IDL.Variant({
     'device_registration_mode_off' : IDL.Null,
@@ -268,11 +270,14 @@ export const idlFactory = ({ IDL }) => {
     'success' : IDL.Principal,
     'failed' : IDL.Text,
   });
-  const BufferedArchiveEntry = IDL.Record({
-    'sequence_number' : IDL.Nat64,
-    'entry' : IDL.Vec(IDL.Nat8),
-    'anchor_number' : UserNumber,
-    'timestamp' : Timestamp,
+  const OidcConfig = IDL.Record({
+    'openid_configuration' : IDL.Opt(IDL.Text),
+    'issuer' : IDL.Opt(IDL.Text),
+    'discovery_domain' : IDL.Text,
+    'client_id' : IDL.Opt(IDL.Text),
+  });
+  const ExchangeNativeAccessTokenForDelegationRequest = IDL.Record({
+    'access_token' : IDL.Text,
   });
   const UserKey = PublicKey;
   const Delegation = IDL.Record({
@@ -283,6 +288,23 @@ export const idlFactory = ({ IDL }) => {
   const SignedDelegation = IDL.Record({
     'signature' : IDL.Vec(IDL.Nat8),
     'delegation' : Delegation,
+  });
+  const ExchangeNativeAccessTokenForDelegationResponse = IDL.Record({
+    'user_key' : UserKey,
+    'signed_delegation' : SignedDelegation,
+    'expiration' : Timestamp,
+  });
+  const ExchangeNativeAccessTokenForDelegationError = IDL.Variant({
+    'expired' : IDL.Null,
+    'internal_canister_error' : IDL.Text,
+    'not_found' : IDL.Null,
+    'invalid_token' : IDL.Text,
+  });
+  const BufferedArchiveEntry = IDL.Record({
+    'sequence_number' : IDL.Nat64,
+    'entry' : IDL.Vec(IDL.Nat8),
+    'anchor_number' : UserNumber,
+    'timestamp' : Timestamp,
   });
   const SessionKey = PublicKey;
   const AccountDelegationError = IDL.Variant({
@@ -323,6 +345,8 @@ export const idlFactory = ({ IDL }) => {
     'iss' : Iss,
     'sub' : Sub,
     'metadata' : MetadataMapV2,
+    'sso_domain' : IDL.Opt(IDL.Text),
+    'sso_name' : IDL.Opt(IDL.Text),
     'last_usage_timestamp' : IDL.Opt(Timestamp),
   });
   const DeviceRegistrationInfo = IDL.Record({
@@ -413,13 +437,13 @@ export const idlFactory = ({ IDL }) => {
   });
   const NativeAuthorizationRequest = IDL.Record({
     'redirect_uri' : IDL.Text,
-    'client_id' : IDL.Text,
-    'state' : IDL.Text,
-    'scope' : IDL.Vec(IDL.Text),
-    'nonce' : IDL.Text,
     'origin' : FrontendHostname,
+    'scope' : IDL.Vec(IDL.Text),
+    'state' : IDL.Text,
     'max_time_to_live' : IDL.Opt(IDL.Nat64),
+    'nonce' : IDL.Text,
     'session_public_key' : SessionKey,
+    'client_id' : IDL.Text,
   });
   const GetNativeAuthorizationRequestError = IDL.Variant({
     'expired' : IDL.Null,
@@ -519,7 +543,7 @@ export const idlFactory = ({ IDL }) => {
     'Unauthorized' : IDL.Principal,
     'JwtVerificationFailed' : IDL.Null,
   });
-  const OpenIdCredentialKey = IDL.Tuple(Iss, Sub);
+  const OpenIdCredentialKey = IDL.Tuple(Iss, Sub, Aud);
   const OpenIdCredentialRemoveError = IDL.Variant({
     'InternalCanisterError' : IDL.Text,
     'OpenIdCredentialNotFound' : IDL.Null,
@@ -566,6 +590,7 @@ export const idlFactory = ({ IDL }) => {
     'omit_scope' : IDL.Bool,
   });
   const PrepareIcrc3AttributeRequest = IDL.Record({
+    'unmapped_origin' : IDL.Opt(FrontendHostname),
     'origin' : FrontendHostname,
     'account_number' : IDL.Opt(AccountNumber),
     'attributes' : IDL.Vec(AttributeSpec),
@@ -596,19 +621,19 @@ export const idlFactory = ({ IDL }) => {
     'Unauthorized' : IDL.Principal,
   });
   const PrepareNativeAuthorizationRequest = IDL.Record({
-    'client_id' : IDL.Text,
-    'scope' : IDL.Vec(IDL.Text),
-    'nonce' : IDL.Text,
-    'code_challenge_method' : IDL.Text,
-    'state' : IDL.Text,
-    'redirect_uri' : IDL.Text,
-    'response_type' : IDL.Text,
     'response_mode' : IDL.Text,
+    'response_type' : IDL.Text,
+    'redirect_uri' : IDL.Text,
+    'code_challenge_method' : IDL.Text,
     'origin' : FrontendHostname,
-    'code_challenge' : IDL.Text,
+    'scope' : IDL.Vec(IDL.Text),
+    'state' : IDL.Text,
     'max_time_to_live' : IDL.Opt(IDL.Nat64),
+    'code_challenge' : IDL.Text,
+    'nonce' : IDL.Text,
     'session_public_key' : SessionKey,
     'ii_origin' : IDL.Text,
+    'client_id' : IDL.Text,
   });
   const PrepareNativeAuthorizationResponse = IDL.Record({
     'authorize_url' : IDL.Text,
@@ -616,43 +641,29 @@ export const idlFactory = ({ IDL }) => {
   });
   const PrepareNativeAuthorizationError = IDL.Variant({
     'internal_canister_error' : IDL.Text,
-    'invalid_request' : IDL.Text,
     'too_many_requests' : IDL.Null,
     'invalid_redirect_uri' : IDL.Text,
     'invalid_origin' : IDL.Text,
+    'invalid_request' : IDL.Text,
   });
   const RedeemNativeAuthorizationCodeRequest = IDL.Record({
-    'grant_type' : IDL.Text,
-    'code' : IDL.Text,
-    'redirect_uri' : IDL.Text,
     'code_verifier' : IDL.Text,
+    'grant_type' : IDL.Text,
+    'redirect_uri' : IDL.Text,
+    'code' : IDL.Text,
     'client_id' : IDL.Text,
   });
   const RedeemNativeAuthorizationCodeResponse = IDL.Record({
-    'access_token' : IDL.Text,
-    'token_type' : IDL.Text,
-    'expires_in' : IDL.Nat64,
     'id_token' : IDL.Text,
+    'access_token' : IDL.Text,
+    'expires_in' : IDL.Nat64,
+    'token_type' : IDL.Text,
   });
   const RedeemNativeAuthorizationCodeError = IDL.Variant({
+    'internal_canister_error' : IDL.Text,
+    'unsupported_grant_type' : IDL.Text,
     'invalid_grant' : IDL.Text,
     'invalid_request' : IDL.Text,
-    'unsupported_grant_type' : IDL.Text,
-    'internal_canister_error' : IDL.Text,
-  });
-  const ExchangeNativeAccessTokenForDelegationRequest = IDL.Record({
-    'access_token' : IDL.Text,
-  });
-  const ExchangeNativeAccessTokenForDelegationResponse = IDL.Record({
-    'user_key' : UserKey,
-    'signed_delegation' : SignedDelegation,
-    'expiration' : Timestamp,
-  });
-  const ExchangeNativeAccessTokenForDelegationError = IDL.Variant({
-    'invalid_token' : IDL.Text,
-    'expired' : IDL.Null,
-    'not_found' : IDL.Null,
-    'internal_canister_error' : IDL.Text,
   });
   const ChallengeResult = IDL.Record({
     'key' : ChallengeKey,
@@ -703,6 +714,7 @@ export const idlFactory = ({ IDL }) => {
   return IDL.Service({
     'acknowledge_entries' : IDL.Func([IDL.Nat64], [], []),
     'add' : IDL.Func([UserNumber, DeviceData], [], []),
+    'add_discoverable_oidc_config' : IDL.Func([DiscoverableOidcConfig], [], []),
     'add_tentative_device' : IDL.Func(
         [UserNumber, DeviceData],
         [AddTentativeDeviceResponse],
@@ -818,16 +830,16 @@ export const idlFactory = ({ IDL }) => {
         ],
         [],
       ),
-    'redeem_native_authorization_code' : IDL.Func(
-        [RedeemNativeAuthorizationCodeRequest],
-        [
-          IDL.Variant({
-            'Ok' : RedeemNativeAuthorizationCodeResponse,
-            'Err' : RedeemNativeAuthorizationCodeError,
-          }),
-        ],
+    'config' : IDL.Func([], [InternetIdentityInit], ['query']),
+    'create_account' : IDL.Func(
+        [UserNumber, FrontendHostname, IDL.Text],
+        [IDL.Variant({ 'Ok' : AccountInfo, 'Err' : CreateAccountError })],
         [],
       ),
+    'create_challenge' : IDL.Func([], [Challenge], []),
+    'deploy_archive' : IDL.Func([IDL.Vec(IDL.Nat8)], [DeployArchiveResult], []),
+    'discovered_oidc_configs' : IDL.Func([], [IDL.Vec(OidcConfig)], ['query']),
+    'enter_device_registration_mode' : IDL.Func([UserNumber], [Timestamp], []),
     'exchange_native_access_token_for_delegation' : IDL.Func(
         [ExchangeNativeAccessTokenForDelegationRequest],
         [
@@ -838,15 +850,6 @@ export const idlFactory = ({ IDL }) => {
         ],
         ['query'],
       ),
-    'config' : IDL.Func([], [InternetIdentityInit], ['query']),
-    'create_account' : IDL.Func(
-        [UserNumber, FrontendHostname, IDL.Text],
-        [IDL.Variant({ 'Ok' : AccountInfo, 'Err' : CreateAccountError })],
-        [],
-      ),
-    'create_challenge' : IDL.Func([], [Challenge], []),
-    'deploy_archive' : IDL.Func([IDL.Vec(IDL.Nat8)], [DeployArchiveResult], []),
-    'enter_device_registration_mode' : IDL.Func([UserNumber], [Timestamp], []),
     'exit_device_registration_mode' : IDL.Func([UserNumber], [], []),
     'fetch_entries' : IDL.Func([], [IDL.Vec(BufferedArchiveEntry)], []),
     'get_account_delegation' : IDL.Func(
@@ -1091,6 +1094,16 @@ export const idlFactory = ({ IDL }) => {
         ],
         [],
       ),
+    'redeem_native_authorization_code' : IDL.Func(
+        [RedeemNativeAuthorizationCodeRequest],
+        [
+          IDL.Variant({
+            'Ok' : RedeemNativeAuthorizationCodeResponse,
+            'Err' : RedeemNativeAuthorizationCodeError,
+          }),
+        ],
+        [],
+      ),
     'register' : IDL.Func(
         [DeviceData, ChallengeResult, IDL.Opt(IDL.Principal)],
         [RegisterResponse],
@@ -1115,6 +1128,7 @@ export const idlFactory = ({ IDL }) => {
         [VerifyTentativeDeviceResponse],
         [],
       ),
+    'whoami' : IDL.Func([], [IDL.Principal], ['query']),
   });
 };
 export const init = ({ IDL }) => {
@@ -1148,15 +1162,15 @@ export const init = ({ IDL }) => {
     'auth_scope' : IDL.Vec(IDL.Text),
     'client_id' : IDL.Text,
   });
-  const NativeOidcApplicationType = IDL.Variant({ 'native' : IDL.Null });
   const NativeOidcTokenEndpointAuthMethod = IDL.Variant({ 'none' : IDL.Null });
+  const NativeOidcApplicationType = IDL.Variant({ 'native' : IDL.Null });
   const NativeOidcClientConfig = IDL.Record({
-    'client_id' : IDL.Text,
     'redirect_uris' : IDL.Vec(IDL.Text),
     'allowed_origins' : IDL.Vec(IDL.Text),
-    'application_type' : NativeOidcApplicationType,
     'token_endpoint_auth_method' : NativeOidcTokenEndpointAuthMethod,
     'require_pkce' : IDL.Bool,
+    'client_id' : IDL.Text,
+    'application_type' : NativeOidcApplicationType,
   });
   const CaptchaConfig = IDL.Record({
     'max_unsolved_captchas' : IDL.Nat64,
@@ -1178,18 +1192,19 @@ export const init = ({ IDL }) => {
     'time_per_token_ns' : IDL.Nat64,
   });
   const InternetIdentityInit = IDL.Record({
+    'native_oidc_issuer_origin' : IDL.Opt(IDL.Text),
     'is_production' : IDL.Opt(IDL.Bool),
     'backend_canister_id' : IDL.Opt(IDL.Principal),
     'enable_dapps_explorer' : IDL.Opt(IDL.Bool),
     'assigned_user_number_range' : IDL.Opt(IDL.Tuple(IDL.Nat64, IDL.Nat64)),
     'new_flow_origins' : IDL.Opt(IDL.Vec(IDL.Text)),
+    'sso_discoverable_domains' : IDL.Opt(IDL.Vec(IDL.Text)),
     'archive_config' : IDL.Opt(ArchiveConfig),
     'canister_creation_cycles_cost' : IDL.Opt(IDL.Nat64),
     'analytics_config' : IDL.Opt(IDL.Opt(AnalyticsConfig)),
     'related_origins' : IDL.Opt(IDL.Vec(IDL.Text)),
     'openid_configs' : IDL.Opt(IDL.Vec(OpenIdConfig)),
     'native_oidc_clients' : IDL.Opt(IDL.Vec(NativeOidcClientConfig)),
-    'native_oidc_issuer_origin' : IDL.Opt(IDL.Text),
     'backend_origin' : IDL.Opt(IDL.Text),
     'captcha_config' : IDL.Opt(CaptchaConfig),
     'dummy_auth' : IDL.Opt(IDL.Opt(DummyAuthConfig)),

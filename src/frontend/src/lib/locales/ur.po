@@ -22,17 +22,47 @@ msgstr "{0} صارف"
 msgid "{application} has moved to the new Internet Identity"
 msgstr "{application} نئی Internet Identity پر منتقل ہو گئی ہے"
 
+msgid "{attribute}:"
+msgstr "{attribute}:"
+
+msgid "{displayName} account"
+msgstr "{displayName} اکاؤنٹ"
+
+msgid "{domainInput} didn't publish /.well-known/ii-openid-configuration (HTTP {0})."
+msgstr "{domainInput} نے /.well-known/ii-openid-configuration شائع نہیں کیا (HTTP {0})۔"
+
+msgid "{domainInput}'s /.well-known/ii-openid-configuration is malformed."
+msgstr "{domainInput} کی /.well-known/ii-openid-configuration درست شکل میں نہیں ہے۔"
+
+msgid "{domainInput}'s SSO app doesn't allow the hybrid OAuth flow II requires. Ask the SSO admin to enable response_type \"id_token code\"."
+msgstr "{domainInput} کی SSO ایپ اس ہائبرڈ OAuth فلو کی اجازت نہیں دیتی جس کی II کو ضرورت ہے۔ SSO ایڈمن سے کہیں کہ response_type \"id_token code\" فعال کریں۔"
+
+msgid "{domainInput}'s SSO denied the sign-in."
+msgstr "{domainInput} کی SSO نے سائن اِن مسترد کر دیا۔"
+
+msgid "{domainInput}'s SSO returned \"{0}\": {1}"
+msgstr "{domainInput} کی SSO نے \"{0}\" واپس کیا: {1}"
+
+msgid "{domainInput}'s SSO returned error \"{0}\"."
+msgstr "{domainInput} کی SSO نے ایرر \"{0}\" واپس کیا۔"
+
 msgid "{identityName} has been removed from this device."
 msgstr "{identityName} کو اس آلے سے ہٹا دیا گیا ہے۔"
 
 msgid "{MAX_ACCOUNTS, plural, one {You have reached the maximum of # account for a single app.} other {You have reached the maximum of # accounts for a single app.}}"
 msgstr "{MAX_ACCOUNTS, plural, one {آپ ایک ایپ کے لیے زیادہ سے زیادہ # اکاؤنٹ کی حد تک پہنچ چکے ہیں۔} other {آپ ایک ایپ کے لیے زیادہ سے زیادہ # اکاؤنٹس کی حد تک پہنچ چکے ہیں۔}}"
 
-msgid "{name} account"
-msgstr "{name} اکاؤنٹ"
-
 msgid "{num, plural, one {# Passkey} other {# Passkeys}}"
 msgstr "{num, plural, one {# پاس کی} other {# پاس کیز}}"
+
+msgid "{providerName} {attribute}:"
+msgstr "{providerName} {attribute}:"
+
+msgid "{providerName} email:"
+msgstr "{providerName} ای میل:"
+
+msgid "{providerName} name:"
+msgstr "{providerName} نام:"
 
 msgid "<0>Completely Redesigned Interface:</0> We've given Internet Identity a fresh, modern look and feel. The new design is intuitive and easier to navigate, ensuring a smoother user journey."
 msgstr "<0>بالکل نئے سرے سے ڈیزائن کیا گیا انٹرفیس:</0> ہم نے Internet Identity کو نیا، جدید انداز اور احساس دیا ہے۔ نیا ڈیزائن بدیہی ہے اور نیویگییشن کو مزید آسان بناتا ہے، جس سے صارف کے سفر میں زیادہ روانی یقینی ہوتی ہے۔"
@@ -54,6 +84,9 @@ msgstr "<0>بلا رکاوٹ پاس کیز کا انضمام:</0> ہم محفو�
 
 msgid "A way to regain access to your identity if you ever lose it."
 msgstr "اگر آپ اپنی شناخت تک رسائی کھو دیں تو اسے دوبارہ حاصل کرنے کا ایک طریقہ۔"
+
+msgid "About"
+msgstr "تعارف"
 
 msgid "Access and recovery"
 msgstr "رسائی اور ریکوری"
@@ -103,6 +136,9 @@ msgstr "اپنی شناخت کے ذریعے سائن اِن کرنے کے طری
 msgid "Advanced identity management"
 msgstr "جدید شناختی نظم و نسق"
 
+msgid "Allow to access this info"
+msgstr "اس معلومات تک رسائی کی اجازت دیں"
+
 msgid "Are you sure?"
 msgstr "کیا آپ کو یقین ہے؟"
 
@@ -112,14 +148,23 @@ msgstr "چونکہ آپ فی الحال اس اکاؤنٹ سے سائن اِن �
 msgid "As you are currently signed in with this passkey, you will be signed out."
 msgstr "چونکہ آپ فی الحال اس پاس کی سے سائن اِن ہیں، اس لیے آپ کو سائن آؤٹ کر دیا جائے گا۔"
 
+msgid "Attribute sharing failed"
+msgstr "ایٹریبیوٹس شیئر کرنا ناکام ہو گیا"
+
 msgid "Authenticating..."
 msgstr "تصدیق ہو رہی ہے..."
+
+msgid "Authentication failed"
+msgstr "تصدیق ناکام ہو گئی"
 
 msgid "Authentication successful"
 msgstr "تصدیق کامیاب رہی"
 
 msgid "Authorize new device"
 msgstr "نئے آلے کی توثیق کریں"
+
+msgid "Back to sign-in options"
+msgstr "سائن اِن کے آپشنز پر واپس جائیں"
 
 msgid "Before getting started, find a private place and have your recovery phrase ready. Keep it confidential to protect your identity."
 msgstr "شروع کرنے سے پہلے کسی نجی جگہ پر جائیں اور اپنا ریکوری فریز تیار رکھیں۔ اپنی شناخت کے تحفظ کے لیے اسے خفیہ رکھیں۔"
@@ -139,6 +184,9 @@ msgstr "منسوخ کریں"
 msgid "CAPTCHA characters"
 msgstr "CAPTCHA حروف"
 
+msgid "Change"
+msgstr "تبدیل کریں"
+
 msgid "Characters are case-sensitive"
 msgstr "حروف بڑے اور چھوٹے ہونے کے لحاظ سے حساس ہوتے ہیں"
 
@@ -151,6 +199,9 @@ msgstr "ریکوری فریز کی جانچ ہو رہی ہے"
 msgid "Checking your order"
 msgstr "آپ کے آرڈر کی جانچ ہو رہی ہے"
 
+msgid "Checking..."
+msgstr "جانچ ہو رہی ہے..."
+
 msgid "Choose an account"
 msgstr "اکاؤنٹ منتخب کریں"
 
@@ -162,6 +213,9 @@ msgstr "طریقہ منتخب کریں"
 
 msgid "Choose method to continue"
 msgstr "جاری رکھنے کے لیے طریقہ منتخب کریں"
+
+msgid "Choose which details you'd like to share"
+msgstr "منتخب کریں کہ آپ کون سی تفصیلات شیئر کرنا چاہتے ہیں"
 
 msgid "Clear all"
 msgstr "سب صاف کریں"
@@ -177,6 +231,12 @@ msgstr "مینو بند کریں"
 
 msgid "Code copied to clipboard"
 msgstr "کوڈ کلپ بورڈ پر کاپی ہو گیا"
+
+msgid "Company domain"
+msgstr "کمپنی کا ڈومین"
+
+msgid "company.domain.com"
+msgstr "company.domain.com"
 
 msgid "Complete set-up"
 msgstr "سیٹ اپ مکمل کریں"
@@ -213,6 +273,12 @@ msgstr "{name} کے ساتھ جاری رکھیں"
 
 msgid "Continue with passkey"
 msgstr "پاس کی کے ساتھ جاری رکھیں"
+
+msgid "Continue with SSO"
+msgstr "SSO کے ساتھ جاری رکھیں"
+
+msgid "Couldn't reach {domainInput}. Check the spelling and your network."
+msgstr "{domainInput} تک نہیں پہنچا جا سکا۔ سپیلنگ اور اپنا نیٹ ورک چیک کریں۔"
 
 msgid "Create account"
 msgstr "اکاؤنٹ بنائیں"
@@ -256,6 +322,9 @@ msgstr "Dashlane کے غیر ہم آہنگ ہونے کی تصدیق ہو گئی 
 msgid "Default"
 msgstr "ڈیفالٹ"
 
+msgid "Deny All"
+msgstr "سب کو مسترد کریں"
+
 msgid "Discoverable passkeys"
 msgstr "قابلِ دریافت پاس کیز"
 
@@ -277,11 +346,11 @@ msgstr "{name} میں ترمیم کریں"
 msgid "Edit account"
 msgstr "اکاؤنٹ میں ترمیم کریں"
 
+msgid "Email:"
+msgstr "ای میل:"
+
 msgid "Enable multiple accounts"
 msgstr "متعدد اکاؤنٹس فعال کریں"
-
-msgid "Encountered an internal error while processing the request."
-msgstr "درخواست پر کارروائی کے دوران ایک اندرونی خرابی پیش آئی۔"
 
 msgid "Enter a name for your identity to complete the upgrade. Once set, it cannot be changed later."
 msgstr "اپ گریڈ مکمل کرنے کے لیے اپنی شناخت کا ایک نام درج کریں۔ ایک بار سیٹ ہو جانے کے بعد، اسے بعد میں تبدیل نہیں کیا جا سکتا۔"
@@ -294,6 +363,9 @@ msgstr "ہر لفظ درست ترتیب میں درج کریں:"
 
 msgid "Enter recovery phrase"
 msgstr "ریکوری فریز درج کریں"
+
+msgid "Enter your company domain"
+msgstr "اپنی کمپنی کا ڈومین درج کریں"
 
 msgid "Everything you need to know about Internet Identity, your private, secure, and easy way to log in to apps on the Internet Computer."
 msgstr "Internet Identity کے بارے میں وہ سب کچھ جو آپ کو جاننا چاہیے — انٹرنیٹ کمپیوٹر کی ایپس میں لاگ اِن کا نجی، محفوظ اور آسان طریقہ۔"
@@ -431,6 +503,9 @@ msgstr "غلط۔ نئے کوڈ کے ساتھ دوبارہ کوشش کریں۔"
 msgid "Interaction canceled. Please try again."
 msgstr "عمل منسوخ کر دیا گیا۔ براہ کرم دوبارہ کوشش کریں۔"
 
+msgid "Internet Identity"
+msgstr "Internet Identity"
+
 msgid "Internet Identity <0>does not</0> store your biometric data. It stays on your device. Your identity acts as a secure passkey manager."
 msgstr "Internet Identity آپ کا بائیومیٹرک ڈیٹا <0>ذخیرہ نہیں کرتی</0>۔ یہ آپ کی ڈیوائس پر ہی رہتا ہے۔ آپ کی شناخت ایک محفوظ پاس کی مینیجر کے طور پر کام کرتی ہے۔"
 
@@ -464,6 +539,9 @@ msgstr "غلط کوڈ لنک"
 msgid "Invalid code. Please check and try again."
 msgstr "غلط کوڈ۔ براہِ کرم چیک کریں اور دوبارہ کوشش کریں"
 
+msgid "Invalid domain"
+msgstr "غلط ڈومین"
+
 msgid "Invalid recovery phrase"
 msgstr "غلط ریکوری فریز"
 
@@ -487,9 +565,6 @@ msgstr "ایسا لگتا ہے کہ ایک غلط تصدیق کی درخواست
 
 msgid "It seems like the connection with the service could not be established. Try a different browser; if the issue persists, contact support."
 msgstr "ایسا لگتا ہے کہ سروس کے ساتھ رابطہ قائم نہیں ہو سکا۔ دوسرا براؤزر آزمائیں؛ اگر مسئلہ برقرار رہے تو سپورٹ سے رابطہ کریں۔"
-
-msgid "It seems like the connection with the service could not be re-established."
-msgstr "ایسا لگتا ہے کہ سروس کے ساتھ دوبارہ رابطہ قائم نہیں ہو سکا۔"
 
 msgid "It seems like the request could not be processed."
 msgstr "ایسا لگتا ہے کہ درخواست پر کارروائی نہیں ہو سکی۔"
@@ -532,6 +607,9 @@ msgstr "حد مکمل ہو گئی"
 
 msgid "Link copied to clipboard"
 msgstr "لنک کلپ بورڈ پر کاپی ہو گیا"
+
+msgid "Loading permissions"
+msgstr "اجازتیں لوڈ ہو رہی ہیں"
 
 msgid "Locked legacy recovery phrase"
 msgstr "مقفل پرانا ریکوری فریز"
@@ -596,6 +674,9 @@ msgstr "اکاؤنٹ کا نام رکھیں"
 msgid "Name your identity"
 msgstr "اپنی شناخت کا نام رکھیں"
 
+msgid "Name:"
+msgstr "نام:"
+
 msgid "No data is shared with Google, Microsoft or Apple on which applications you log in with Internet Identity."
 msgstr "Google، Microsoft یا Apple کے ساتھ یہ معلومات شیئر نہیں کی جاتیں کہ آپ Internet Identity کے ذریعے کن ایپلیکیشنز میں لاگ اِن کرتے ہیں۔"
 
@@ -634,6 +715,9 @@ msgstr "جاری رکھنے کے لیے براؤزر میں کھولیں"
 
 msgid "Open menu"
 msgstr "مینو کھولیں"
+
+msgid "Or sign in with another identity"
+msgstr "یا کسی دوسری شناخت سے سائن اِن کریں"
 
 msgid "Pairing link"
 msgstr "پیئرنگ لنک"
@@ -707,9 +791,6 @@ msgstr "ریکوری فریز کی تصدیق نہیں ہوئی"
 msgid "Recovery phrase set"
 msgstr "ریکوری فریز سیٹ کر دیا گیا"
 
-msgid "Redirecting to the app"
-msgstr "ایپ کی طرف ری ڈائریکٹ کیا جا رہا ہے"
-
 msgid "Remove"
 msgstr "ہٹائیں"
 
@@ -767,6 +848,9 @@ msgstr "ایپ پر واپس جائیں"
 msgid "Return to application"
 msgstr "ایپلی کیشن پر واپس جائیں"
 
+msgid "Review Permissions"
+msgstr "اجازتوں کا جائزہ لیں"
+
 msgid "Right now"
 msgstr "ابھی"
 
@@ -803,6 +887,12 @@ msgstr "سیشن کا وقت ختم ہو گیا"
 msgid "Set as default sign-in"
 msgstr "ڈیفالٹ سائن اِن کے طور پر سیٹ کریں"
 
+msgid "Several SSO sign-ins are in flight already. Wait a moment."
+msgstr "متعدد SSO سائن اِن پہلے ہی جاری ہیں۔ ایک لمحہ انتظار کریں۔"
+
+msgid "Share {label}"
+msgstr "{label} شیئر کریں"
+
 msgid "Show all"
 msgstr "سب دکھائیں"
 
@@ -812,8 +902,14 @@ msgstr "سائن اِن"
 msgid "Sign in again to continue where you left off."
 msgstr "جہاں آپ نے چھوڑا تھا وہاں سے جاری رکھنے کے لیے دوبارہ سائن ان کریں۔"
 
+msgid "Sign in or create an identity to access apps without passwords or sharing personal data."
+msgstr "بغیر پاس ورڈز یا ذاتی ڈیٹا شیئر کیے ایپس تک رسائی کے لیے سائن اِن کریں یا شناخت بنائیں۔"
+
 msgid "Sign in there."
 msgstr "وہاں سائن اِن کریں۔"
+
+msgid "Sign in to manage your identity"
+msgstr "اپنی شناخت کا انتظام کرنے کے لیے سائن اِن کریں"
 
 msgid "Sign in using familiar methods"
 msgstr "مانوس طریقوں سے سائن اِن کریں"
@@ -821,8 +917,8 @@ msgstr "مانوس طریقوں سے سائن اِن کریں"
 msgid "Sign in with another identity"
 msgstr "دوسری شناخت کے ساتھ سائن اِن کریں"
 
-msgid "Sign in with your {name} account from any device."
-msgstr "کسی بھی آلے سے اپنے {name} اکاؤنٹ کے ساتھ سائن اِن کریں۔"
+msgid "Sign in with your {displayName} account from any device."
+msgstr "اپنے {displayName} اکاؤنٹ سے کسی بھی آلے سے سائن اِن کریں۔"
 
 msgid "Sign out"
 msgstr "سائن آؤٹ"
@@ -855,12 +951,23 @@ msgctxt "The user entered an incorrect value during a verification step"
 msgid "Something is wrong!"
 msgstr "کچھ غلط ہے!"
 
-msgctxt "Fallback error message when an unexpected error is caught"
-msgid "Something went wrong"
-msgstr "کچھ غلط ہو گیا"
+msgid "Something went wrong while creating your delegation. Please try again; if the issue persists, contact support."
+msgstr "آپ کی ڈیلیگیشن بناتے وقت کچھ غلط ہو گیا۔ براہ کرم دوبارہ کوشش کریں؛ اگر مسئلہ برقرار رہے تو سپورٹ سے رابطہ کریں۔"
+
+msgid "Something went wrong while sharing attributes. Please try again; if the issue persists, contact support."
+msgstr "ایٹریبیوٹس شیئر کرتے وقت کچھ غلط ہو گیا۔ براہ کرم دوبارہ کوشش کریں؛ اگر مسئلہ برقرار رہے تو سپورٹ سے رابطہ کریں۔"
 
 msgid "Source code"
 msgstr "سورس کوڈ"
+
+msgid "SSO"
+msgstr "SSO"
+
+msgid "SSO is not available for \"{domainInput}\" yet. Ask an II admin to register this domain."
+msgstr "SSO ابھی \"{domainInput}\" کے لیے دستیاب نہیں ہے۔ اس ڈومین کو رجسٹر کرنے کے لیے II ایڈمن سے کہیں۔"
+
+msgid "SSO sign-in for {domainInput} failed. Please try again."
+msgstr "{domainInput} کے لیے SSO سائن اِن ناکام ہو گیا۔ براہ کرم دوبارہ کوشش کریں۔"
 
 msgid "Start over"
 msgstr "دوبارہ شروع کریں"
@@ -940,6 +1047,9 @@ msgstr "ایپلیکیشن کے ساتھ منسلک ہونے میں مسئلہ �
 msgid "This app has moved to the new Internet Identity"
 msgstr "یہ ایپ نئی Internet Identity پر منتقل ہو گئی ہے"
 
+msgid "This browser is not supported."
+msgstr "یہ براؤزر معاون نہیں ہے۔"
+
 msgid "This identity has already been upgraded to the new experience."
 msgstr "یہ شناخت پہلے ہی نئے تجربے پر اپ گریڈ ہو چکی ہے۔"
 
@@ -951,6 +1061,9 @@ msgstr "اس میں کچھ سیکنڈ لگ سکتے ہیں"
 
 msgid "This passkey is no longer associated with any identity."
 msgstr "یہ پاس کی اب کسی شناخت سے منسلک نہیں ہے۔"
+
+msgid "This SSO is already linked to your identity."
+msgstr "یہ SSO پہلے ہی آپ کی شناخت سے منسلک ہے۔"
 
 msgid "This YubiKey has older firmware (5.1) that's incompatible."
 msgstr "اس YubiKey کا فرم ویئر پرانا (5.1) ہے اور یہ اس سسٹم کے ساتھ مطابقت نہیں رکھتا۔"
@@ -988,6 +1101,9 @@ msgstr "جاری رکھنے کے لیے:"
 msgid "To finish setting up your passkey, follow the instructions shown on your <0>new device</0>."
 msgstr "اپنی پاس کی سیٹ اپ مکمل کرنے کے لیے، اپنی <0>نئی ڈیوائس</0> پر دکھائی گئی ہدایات پر عمل کریں۔"
 
+msgid "Too many recent attempts for {domainInput}. Wait a few minutes."
+msgstr "{domainInput} کے لیے حالیہ کوششیں بہت زیادہ ہیں۔ چند منٹ انتظار کریں۔"
+
 msgid "Type each word in the correct order:"
 msgstr "ہر لفظ درست ترتیب میں درج کریں:"
 
@@ -1005,9 +1121,6 @@ msgstr "Internet Identity کو سمجھیں"
 
 msgid "Undo"
 msgstr "واپس کریں"
-
-msgid "Unexpected error"
-msgstr "غیر متوقع خرابی"
 
 msgid "Unknown"
 msgstr "نامعلوم"
@@ -1032,6 +1145,9 @@ msgstr "جاری رکھنے کے لیے ان لاک کریں"
 
 msgid "Unsupported"
 msgstr "غیر معاون"
+
+msgid "Unsupported browser"
+msgstr "غیر معاون براؤزر"
 
 msgid "Unsupported Browser"
 msgstr "آپ کا براؤزر اس سروس کو سپورٹ نہیں کرتا"
@@ -1147,8 +1263,8 @@ msgstr "آپ کا پہلے ہی ایک {name} اکاؤنٹ منسلک ہے"
 msgid "You are upgrading ID <0>{identityNumber}</0>"
 msgstr "آپ ID <0>{identityNumber}</0> کو اپ گریڈ کر رہے ہیں"
 
-msgid "You can add it back anytime by signing in with the same {openIdProvider} account."
-msgstr "آپ اسی {openIdProvider} اکاؤنٹ سے سائن اِن کر کے اسے کسی بھی وقت واپس شامل کر سکتے ہیں۔"
+msgid "You can add it back anytime by signing in with the same {provider} account."
+msgstr "آپ اسی {provider} اکاؤنٹ سے سائن اِن کر کے اسے کسی بھی وقت واپس شامل کر سکتے ہیں۔"
 
 msgid "You can add it back anytime by signing in with the same passkey."
 msgstr "آپ اسی پاس کی سے سائن اِن کر کے اسے کسی بھی وقت واپس شامل کر سکتے ہیں۔"

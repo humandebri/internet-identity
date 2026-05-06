@@ -3,6 +3,7 @@ import { bytesToHex } from "@noble/hashes/utils";
 import type { Identity, SignIdentity } from "@icp-sdk/core/agent";
 import { Actor, HttpAgent } from "@icp-sdk/core/agent";
 import {
+  AttributesIdentity,
   DelegationChain,
   DelegationIdentity,
   Ed25519KeyIdentity,
@@ -14,7 +15,13 @@ import ReactDOM from "react-dom/client";
 
 import { decodeJwt } from "jose";
 
-import { authWithII, CertifiedAttribute, extractDelegation } from "./auth";
+import {
+  authWithII,
+  CertifiedAttribute,
+  extractDelegation,
+  Icrc3Attributes,
+} from "./auth";
+import { formatIcrc3Attributes } from "./icrc3";
 
 import "./main.css";
 
@@ -78,14 +85,41 @@ const allowPinAuthenticationEl = document.getElementById(
   "allowPinAuthentication",
 ) as HTMLInputElement;
 const useIcrc25El = document.getElementById("useIcrc25") as HTMLInputElement;
+const useIcrc3AttributesEl = document.getElementById(
+  "useIcrc3Attributes",
+) as HTMLInputElement;
+const icrc3NonceEl = document.getElementById("icrc3Nonce") as HTMLInputElement;
 const requestAttributesEl = document.getElementById(
   "requestAttributes",
 ) as HTMLInputElement;
+const icrc3AttributesEl = document.getElementById(
+  "icrc3Attributes",
+) as HTMLPreElement;
+const icrc3AttributesDecodedEl = document.getElementById(
+  "icrc3AttributesDecoded",
+) as HTMLPreElement;
+const sendAttributesBtn = document.getElementById(
+  "sendAttributesBtn",
+) as HTMLButtonElement;
+const iiCanisterIdEl = document.getElementById(
+  "iiCanisterId",
+) as HTMLInputElement;
+const canisterEchoedAttributesEl = document.getElementById(
+  "canisterEchoedAttributes",
+) as HTMLPreElement;
+const canisterEchoedAttributesRawEl = document.getElementById(
+  "canisterEchoedAttributesRaw",
+) as HTMLPreElement;
 
 let iiProtocolTestWindow: Window | undefined;
 
 // The identity set by the authentication
 let delegationIdentity: DelegationIdentity | undefined = undefined;
+
+// The most recently received ICRC-3 attribute bundle, kept around so the
+// "Send attributes to canister" button can wrap the delegation identity in
+// `AttributesIdentity` and replay them against the test_app canister.
+let latestIcrc3Attributes: Icrc3Attributes | undefined = undefined;
 
 // The local, ephemeral key-pair
 let localIdentity_: SignIdentity | undefined = undefined;
@@ -115,6 +149,10 @@ const idlFactory = ({ IDL }: { IDL: any }) => {
     Redirect: IDL.Record({ location: IDL.Text }),
     CertifiedContent: IDL.Null,
   });
+  const CallerAttributes = IDL.Record({
+    signer: IDL.Opt(IDL.Principal),
+    data: IDL.Vec(IDL.Nat8),
+  });
   return IDL.Service({
     http_request: IDL.Func([HttpRequest], [HttpResponse], ["query"]),
     update_alternative_origins: IDL.Func(
@@ -123,6 +161,7 @@ const idlFactory = ({ IDL }: { IDL: any }) => {
       [],
     ),
     whoami: IDL.Func([], [IDL.Principal], ["query"]),
+    caller_attributes: IDL.Func([], [CallerAttributes], []),
   });
 };
 
@@ -130,10 +169,12 @@ const updateDelegationView = ({
   authnMethod,
   identity,
   certifiedAttributes,
+  icrc3Attributes,
 }: {
   authnMethod?: string;
   identity: Identity;
   certifiedAttributes?: Record<string, CertifiedAttribute>;
+  icrc3Attributes?: Icrc3Attributes;
 }) => {
   principalEl.innerText = identity.getPrincipal().toText();
 
@@ -186,13 +227,38 @@ const updateDelegationView = ({
     ).toString();
 
     // Display certified attributes if available.
-    if (certifiedAttributes) {
+    if (certifiedAttributes !== undefined) {
       certifiedAttributesEl.innerText = Object.entries(certifiedAttributes)
         .sort(([keyA], [keyB]) => keyA.localeCompare(keyB))
         .map(([key, { value }]) => `${key}: ${new TextDecoder().decode(value)}`)
         .join("\n");
     } else {
-      certifiedAttributesEl.innerText = "No certified attributes";
+      certifiedAttributesEl.innerText = "";
+    }
+
+    // Display ICRC-3 attributes if available, and stash the bundle so
+    // the canister round-trip button can consume it.
+    latestIcrc3Attributes = icrc3Attributes;
+    canisterEchoedAttributesEl.innerText = "";
+    if (icrc3Attributes !== undefined) {
+      icrc3AttributesEl.innerText = JSON.stringify({
+        // @ts-ignore Not known in TS types yet but supported in all browsers
+        data: icrc3Attributes.data.toBase64(),
+        // @ts-ignore Not known in TS types yet but supported in all browsers
+        signature: icrc3Attributes.signature.toBase64(),
+      });
+      try {
+        icrc3AttributesDecodedEl.innerText = formatIcrc3Attributes(
+          icrc3Attributes.data,
+        );
+      } catch (err) {
+        icrc3AttributesDecodedEl.innerText = `Failed to decode: ${
+          err instanceof Error ? err.message : String(err)
+        }`;
+      }
+    } else {
+      icrc3AttributesEl.innerText = "";
+      icrc3AttributesDecodedEl.innerText = "";
     }
   } else {
     delegationEl.innerText = "Current identity is not a DelegationIdentity";
@@ -311,6 +377,12 @@ const init = async () => {
         sessionIdentity: getLocalIdentity(),
         autoSelectionPrincipal,
         useIcrc25: useIcrc25El.checked,
+        useIcrc3Attributes: useIcrc3AttributesEl.checked,
+        icrc3Nonce:
+          icrc3NonceEl.value.trim() !== ""
+            ? // @ts-ignore Not known in TS types yet but supported in all browsers
+              Uint8Array.fromBase64(icrc3NonceEl.value.trim())
+            : undefined,
         requestAttributes: requestAttributesEl.value
           .split("\n")
           .map((s) => s.trim())
@@ -321,6 +393,7 @@ const init = async () => {
         identity: delegationIdentity,
         authnMethod: result.authnMethod,
         certifiedAttributes: result.certifiedAttributes,
+        icrc3Attributes: result.icrc3Attributes,
       });
     } catch (e) {
       showError(JSON.stringify(e));
@@ -429,6 +502,61 @@ const init = async () => {
 };
 
 window.addEventListener("DOMContentLoaded", init);
+
+sendAttributesBtn.addEventListener("click", async () => {
+  if (delegationIdentity === undefined) {
+    showError("Sign in first");
+    return;
+  }
+  if (latestIcrc3Attributes === undefined) {
+    showError("No ICRC-3 attribute bundle from the last sign-in");
+    return;
+  }
+  const iiCanisterIdText = iiCanisterIdEl.value.trim();
+  if (iiCanisterIdText === "") {
+    showError("Set the II canister id (signer) first");
+    return;
+  }
+
+  const canisterId = Principal.fromText(readCanisterId());
+  const identity = new AttributesIdentity({
+    inner: delegationIdentity,
+    attributes: latestIcrc3Attributes,
+    signer: { canisterId: Principal.fromText(iiCanisterIdText) },
+  });
+  const agent = await HttpAgent.create({
+    host: hostUrlEl.value,
+    identity,
+    shouldFetchRootKey: true,
+  });
+  const actor = Actor.createActor(idlFactory, { agent, canisterId });
+
+  canisterEchoedAttributesEl.innerText = "Loading...";
+  canisterEchoedAttributesRawEl.innerText = "";
+  try {
+    const response = (await actor.caller_attributes()) as {
+      signer: [] | [Principal];
+      data: Uint8Array | number[];
+    };
+    const data =
+      response.data instanceof Uint8Array
+        ? response.data
+        : new Uint8Array(response.data);
+    canisterEchoedAttributesRawEl.innerText = JSON.stringify({
+      signer: response.signer.length === 0 ? null : response.signer[0].toText(),
+      // @ts-ignore Not known in TS types yet but supported in all browsers
+      data: data.toBase64(),
+    });
+    const formatted = formatIcrc3Attributes(data);
+    const signerText =
+      response.signer.length === 0 ? "(none)" : response.signer[0].toText();
+    canisterEchoedAttributesEl.innerText = `signer: ${signerText}\n${formatted}`;
+  } catch (err) {
+    canisterEchoedAttributesEl.innerText = `Failed: ${
+      err instanceof Error ? err.message : String(err)
+    }`;
+  }
+});
 
 whoamiBtn.addEventListener("click", async () => {
   const canisterId = Principal.fromText(readCanisterId());

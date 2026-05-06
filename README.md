@@ -1,4 +1,4 @@
-<p align="center"><a href="https://identity.internetcomputer.org" target="_blank" rel="noopener noreferrer"><img width="600" src="./ii-logo.png" alt="Internet Identity"/></a></p>
+<p align="center"><a href="https://id.ai" target="_blank" rel="noopener noreferrer"><img width="600" src="./ii-logo.png" alt="Internet Identity"/></a></p>
 
 <p align="center">
     <a href="https://github.com/dfinity/internet-identity/actions/workflows/canister-tests.yml"><img src="https://github.com/dfinity/internet-identity/actions/workflows/canister-tests.yml/badge.svg" alt="Canister Tests" /></a>
@@ -8,12 +8,12 @@
 </p>
 
 <p align="center">
-    🔗 <a href="https://identity.internetcomputer.org">https://identity.internetcomputer.org</a> • 📜 <a href="https://internetcomputer.org/docs/current/references/ii-spec">Specification</a> <br/> ― <br/>📚 <a href="https://forum.dfinity.org/c/internet-identity/32">Forum</a> • 🚑 <a href="https://github.com/dfinity/internet-identity/issues/new">Report an Issue</a> • 📞 <a href="https://discord.internetcomputer.org">Discord</a>
+    🔗 <a href="https://id.ai">https://id.ai</a> • 📜 <a href="https://internetcomputer.org/docs/current/references/ii-spec">Specification</a> <br/> ― <br/>📚 <a href="https://forum.dfinity.org/c/internet-identity/32">Forum</a> • 🚑 <a href="https://github.com/dfinity/internet-identity/issues/new">Report an Issue</a> • 📞 <a href="https://discord.internetcomputer.org">Discord</a>
 </p>
 
 ---
 
-Internet Identity is an authentication and identity service for the [Internet Computer][ic]. It enables hundreds of thousands of users to securely log in to dapps such as [OISY](https://oisy.com), [Caffeine](https://caffeine.ai), [NNS Dapp](https://nns.internetcomputer.org), [OpenChat](https://oc.app), and [many more](https://identity.internetcomputer.org).
+Internet Identity is an authentication and identity service for the [Internet Computer][ic]. It enables hundreds of thousands of users to securely log in to dapps such as [OISY](https://oisy.com), [Caffeine](https://caffeine.ai), [NNS Dapp](https://nns.internetcomputer.org), [OpenChat](https://oc.app), and [many more](https://id.ai).
 
 Internet Identity is:
 
@@ -43,28 +43,20 @@ This section gives an overview of Internet Identity's architecture, instructions
 
 ### Local Replica
 
-Use the Internet Identity canister in your local dfx project by adding the following code snippet to your `dfx.json` file:
+Use the Internet Identity canister in your local icp-cli project by adding the following snippet to the `canisters` array in your `icp.yaml` file:
 
-```json
-{
-  "canisters": {
-    "internet_identity": {
-      "type": "custom",
-      "candid": "https://github.com/dfinity/internet-identity/releases/download/release-2025-04-04-v3/internet_identity.did",
-      "wasm": "https://github.com/dfinity/internet-identity/releases/download/release-2025-04-04-v3/internet_identity_production.wasm.gz",
-      "init_arg": "(opt record { captcha_config = opt record { max_unsolved_captchas= 50:nat64; captcha_trigger = variant {Static = variant {CaptchaDisabled}}}})",
-      "remote": {
-        "id": {
-          "ic": "rdmx6-jaaaa-aaaaa-aaadq-cai"
-        }
-      },
-      "frontend": {}
-    }
-  }
-}
+```yaml
+canisters:
+  - name: internet_identity
+    build:
+      steps:
+        - type: pre-built
+          url: https://github.com/dfinity/internet-identity/releases/download/release-2025-04-04-v3/internet_identity_production.wasm.gz
+    init_args: "(opt record { captcha_config = opt record { max_unsolved_captchas= 50:nat64; captcha_trigger = variant {Static = variant {CaptchaDisabled}}}})"
+```
 ```
 
-To deploy, run `dfx deploy`.
+To deploy, run `icp deploy`.
 
 To access Internet Identity or configure it for your dapp, use one of the following URLs:
 
@@ -129,7 +121,7 @@ Internet Identity requires data in stable memory to have a specific layout in or
 
 If on upgrade II traps with the message `stable memory layout version ... is no longer supported` then the stable memory layout has changed and is no longer compatible.
 
-The easiest way to address this is to reinstall the canister (thus wiping stable memory). A canister can be reinstalled by executing `dfx deploy <canister> --mode reinstall`.
+The easiest way to address this is to reinstall the canister (thus wiping stable memory). A canister can be reinstalled by executing `icp deploy <canister> --mode reinstall`.
 
 ## Contributing
 

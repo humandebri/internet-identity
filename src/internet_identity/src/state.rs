@@ -121,6 +121,12 @@ pub struct PersistentState {
     pub native_oidc_clients: Option<Vec<NativeOidcClientConfig>>,
     // Trusted issuer origin used by native OIDC discovery and signed tokens
     pub native_oidc_issuer_origin: Option<String>,
+    // Allowlist of domains accepted by `add_discoverable_oidc_config`. `None`
+    // falls back to the built-in `is_production`-keyed defaults; `Some(vec)`
+    // replaces them entirely.
+    pub sso_discoverable_domains: Option<Vec<String>>,
+    // SSO provider configs managed via add_discoverable_oidc_config update call.
+    pub oidc_configs: Option<Vec<DiscoverableOidcConfig>>,
     // Configuration for Web Analytics tool
     pub analytics_config: Option<AnalyticsConfig>,
     // Key into the event_data BTreeMap where the 24h tracking window starts.
@@ -149,6 +155,8 @@ impl Default for PersistentState {
             openid_configs: None,
             native_oidc_clients: None,
             native_oidc_issuer_origin: None,
+            sso_discoverable_domains: None,
+            oidc_configs: None,
             analytics_config: None,
             event_stats_24h_start: None,
             enable_dapps_explorer: None,

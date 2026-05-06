@@ -1,5 +1,4 @@
 <script lang="ts">
-  import Button from "$lib/components/ui/Button.svelte";
   import ConfirmDeviceIllustration from "$lib/components/illustrations/ConfirmDeviceIllustration.svelte";
   import ProgressRing from "$lib/components/ui/ProgressRing.svelte";
   import CodeInput from "$lib/components/ui/CodeInput.svelte";
@@ -8,6 +7,10 @@
   import { Trans } from "$lib/components/locale";
 
   const CODE_LENGTH = 6;
+  // Non-breaking space rendered through CodeInput's `hint` slot to reserve
+  // the line's vertical space when no error is shown — keeping the slot
+  // mounted prevents the layout from shifting when the error appears.
+  const HINT_PLACEHOLDER = " ";
 
   interface Props {
     confirm: (confirmationCode: string) => Promise<void>;
@@ -25,7 +28,7 @@
     isConfirming = true;
     try {
       await confirm(confirmationCode);
-    } catch (error) {
+    } catch {
       isInvalidCode = true;
       confirmationCode = "";
     } finally {
@@ -34,7 +37,7 @@
   };
 
   $effect(() => {
-    if (confirmationCode) {
+    if (confirmationCode.length > 0) {
       isInvalidCode = false;
     }
   });
@@ -77,16 +80,14 @@
     error={isInvalidCode
       ? $t`Invalid code. Please check and try again.`
       : undefined}
-    hint={"\u00a0"}
+    hint={HINT_PLACEHOLDER}
     disabled={isConfirming}
   />
-  <Button
+  <button
+    class="btn btn-primary btn-xl mb-3"
     onclick={handleSubmit}
-    variant="primary"
-    size="xl"
     type="submit"
     disabled={confirmationCode.length < CODE_LENGTH || isConfirming}
-    class="mb-3"
   >
     {#if isConfirming}
       <ProgressRing />
@@ -94,16 +95,15 @@
     {:else}
       <span>{$t`Confirm sign-in`}</span>
     {/if}
-  </Button>
-  <Button
+  </button>
+  <button
+    class="btn btn-secondary btn-xl"
     onclick={restart}
-    variant="secondary"
-    size="xl"
     disabled={isConfirming}
   >
     <RotateCcwIcon class="size-5" />
     <span>{$t`Start over`}</span>
-  </Button>
+  </button>
 </form>
 
 <style>

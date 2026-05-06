@@ -1,12 +1,18 @@
 <script lang="ts">
   import PasskeyIcon from "../icons/PasskeyIcon.svelte";
+  import SsoIcon from "../icons/SsoIcon.svelte";
+
+  export type AuthMethodBadgeVariant =
+    | { type: "passkey" }
+    | { type: "openid"; logo?: string }
+    | { type: "sso" };
 
   type Props = {
-    logo: string | undefined;
+    variant: AuthMethodBadgeVariant;
     size: "sm" | "lg";
   };
 
-  let { logo, size }: Props = $props();
+  let { variant, size }: Props = $props();
 </script>
 
 <span
@@ -17,11 +23,16 @@
       : "-inset-e-1.25 -bottom-1.25 size-5",
   ]}
 >
-  {#if logo !== undefined}
+  {#if variant.type === "sso"}
+    <SsoIcon
+      class={["text-fg-tertiary", size === "lg" ? "size-4.25!" : "size-3!"]}
+    />
+  {:else if variant.type === "openid" && variant.logo !== undefined}
     <span
       class={["text-fg-tertiary", size === "lg" ? "size-4.25" : "size-3.25"]}
     >
-      {@html logo}
+      <!-- eslint-disable-next-line svelte/no-at-html-tags -- variant.logo is a trusted SVG string sourced from the backend canister's openid_configs -->
+      {@html variant.logo}
     </span>
   {:else}
     <PasskeyIcon

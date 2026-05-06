@@ -7,7 +7,7 @@
 
   type Props = HTMLAttributes<HTMLElement>;
 
-  const { children, class: className, ...props }: Props = $props();
+  const { class: className, ...props }: Props = $props();
 
   let isLanguageDialogOpen = $state(false);
 </script>
@@ -27,6 +27,14 @@
     >
       {$localeStore}
     </button>
+    <a
+      href="/about"
+      target="_blank"
+      rel="noopener"
+      class="outline-0 focus-visible:underline"
+    >
+      {$t`About`}
+    </a>
     <a
       href={SUPPORT_URL}
       target="_blank"
@@ -53,7 +61,7 @@
       value={$localeStore}
       onChange={(value) => {
         isLanguageDialogOpen = false;
-        localeStore.setOrReset(value);
+        void localeStore.setOrReset(value);
       }}
     />
   </Dialog>

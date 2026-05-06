@@ -1,6 +1,5 @@
 <script lang="ts">
   import { tick } from "svelte";
-  import Button from "$lib/components/ui/Button.svelte";
   import Input from "$lib/components/ui/Input.svelte";
   import ProgressRing from "$lib/components/ui/ProgressRing.svelte";
   import { t } from "$lib/stores/locale.store";
@@ -30,13 +29,13 @@
   });
 
   $effect.pre(() => {
-    if (image) {
+    if (image.length > 0) {
       solution = "";
       loading = false;
       if (attempt > 0) {
         error = true;
       }
-      tick().then(() => {
+      void tick().then(() => {
         inputRef?.focus();
       });
     }
@@ -61,7 +60,7 @@
       alt={$t`CAPTCHA characters`}
     />
     <div
-      class={"bg-text-primary absolute inset-0 mix-blend-lighten dark:mix-blend-darken"}
+      class="bg-text-primary absolute inset-0 mix-blend-lighten dark:mix-blend-darken"
     ></div>
   </div>
   <Input
@@ -77,11 +76,11 @@
     hint={$t`Characters are case-sensitive`}
     error={error ? $t`Incorrect. Try again with the new code.` : undefined}
   />
-  <Button
+  <button
+    class="btn btn-primary btn-lg"
     onclick={handleSubmit}
     type="submit"
     disabled={solution.length === 0 || loading}
-    size="lg"
   >
     {#if loading}
       <ProgressRing />
@@ -89,5 +88,5 @@
     {:else}
       <span>{$t`Verify`}</span>
     {/if}
-  </Button>
+  </button>
 </form>

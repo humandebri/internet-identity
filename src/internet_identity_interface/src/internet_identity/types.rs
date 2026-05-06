@@ -401,6 +401,12 @@ pub struct InternetIdentityInit {
     pub openid_configs: Option<Vec<OpenIdConfig>>,
     pub native_oidc_clients: Option<Vec<NativeOidcClientConfig>>,
     pub native_oidc_issuer_origin: Option<String>,
+    /// Allowlist of domains that may be registered as discoverable SSO
+    /// providers via `add_discoverable_oidc_config`. When `Some`, this list
+    /// fully replaces the built-in defaults; when `None`, falls back to
+    /// `dfinity.org` (production) or `beta.dfinity.org` (everything else)
+    /// keyed off `is_production`.
+    pub sso_discoverable_domains: Option<Vec<String>>,
     pub analytics_config: Option<Option<AnalyticsConfig>>,
     pub enable_dapps_explorer: Option<bool>,
     pub is_production: Option<bool>,
@@ -537,6 +543,27 @@ pub struct NativeOidcClientConfig {
     pub application_type: NativeOidcApplicationType,
     pub token_endpoint_auth_method: NativeOidcTokenEndpointAuthMethod,
     pub require_pkce: bool,
+}
+
+/// SSO provider configuration that uses two-hop discovery.
+///
+/// The backend fetches `https://{discovery_domain}/.well-known/ii-openid-configuration`
+/// to obtain `{ client_id, openid_configuration }`, then fetches the standard OIDC
+/// discovery document at `openid_configuration` to resolve `issuer` and `jwks_uri`.
+#[derive(Clone, Debug, CandidType, Serialize, Deserialize, Default, Eq, PartialEq)]
+pub struct DiscoverableOidcConfig {
+    pub discovery_domain: String,
+}
+
+/// Resolved SSO provider state returned by the `discovered_oidc_configs` query.
+/// Any field other than `discovery_domain` is `None` until the two-hop discovery
+/// completes for that domain.
+#[derive(Clone, Debug, CandidType, Deserialize, Eq, PartialEq)]
+pub struct OidcConfig {
+    pub discovery_domain: String,
+    pub client_id: Option<String>,
+    pub openid_configuration: Option<String>,
+    pub issuer: Option<String>,
 }
 
 pub enum AuthorizationKey {
