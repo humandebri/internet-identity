@@ -51,8 +51,8 @@ type NativeOidcDelegationInput = NativeOidcDelegationEndpointConfig & {
 
 type CompleteNativeOidcLoginInput = NativeOidcCodeExchangeInput &
   NativeOidcDelegationEndpointConfig & {
-  sessionIdentity: SignIdentity;
-};
+    sessionIdentity: SignIdentity;
+  };
 
 type CompleteNativeOidcLoginResult = {
   tokenResponse: RedeemNativeAuthorizationCodeResponse;
@@ -182,7 +182,8 @@ export const completeNativeOidcLogin = async (
 };
 
 const resolveNativeOidcEndpoints = async (
-  input: NativeOidcCodeExchangeEndpointConfig & NativeOidcDelegationEndpointConfig,
+  input: NativeOidcCodeExchangeEndpointConfig &
+    NativeOidcDelegationEndpointConfig,
 ): Promise<{
   authorizationEndpoint?: string;
   tokenEndpoint: string;
@@ -218,7 +219,8 @@ const resolveNativeOidcEndpoints = async (
 };
 
 const resolveCompleteNativeOidcEndpoints = (
-  input: NativeOidcCodeExchangeEndpointConfig & NativeOidcDelegationEndpointConfig,
+  input: NativeOidcCodeExchangeEndpointConfig &
+    NativeOidcDelegationEndpointConfig,
 ): Promise<{ tokenEndpoint: string; delegationEndpoint: string }> => {
   if (input.issuer !== undefined) {
     return resolveNativeOidcEndpoints(input);

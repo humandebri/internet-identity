@@ -50,7 +50,9 @@ const targetedDelegationBody = `{
 
 describe("nativeOidc", () => {
   it("parses native login endpoints from discovery", async () => {
-    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(discoveryBody));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(discoveryBody));
 
     const discovery = await fetchNativeOidcDiscovery({
       issuer: "https://identity.ic0.app",
@@ -321,17 +323,15 @@ describe("nativeOidc", () => {
   });
 
   it("surfaces delegation exchange errors without polling", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        jsonResponse(
-          JSON.stringify({
-            error: "invalid_token",
-            error_description: "access token expired",
-          }),
-          401,
-        ),
-      );
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse(
+        JSON.stringify({
+          error: "invalid_token",
+          error_description: "access token expired",
+        }),
+        401,
+      ),
+    );
 
     await expect(
       fetchIcDelegation({

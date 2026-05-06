@@ -1089,9 +1089,9 @@ fn verify_claims(
 
 #[cfg(test)]
 thread_local! {
-    static TEST_CALLER: Cell<Principal> = Cell::new(Principal::from_text("x4gp4-hxabd-5jt4d-wc6uw-qk4qo-5am4u-mncv3-wz3rt-usgjp-od3c2-oae").unwrap());
-    static TEST_TIME: Cell<u64> = const { Cell::new(secs_to_nanos(1_736_794_102)) };
-    static TEST_CERTS: Cell<Vec<Jwk>> = Cell::new(serde_json::from_str::<Certs>(r#"{"keys":[{"n": "jwstqI4w2drqbTTVRDriFqepwVVI1y05D5TZCmGvgMK5hyOsVW0tBRiY9Jk9HKDRue3vdXiMgarwqZEDOyOA0rpWh-M76eauFhRl9lTXd5gkX0opwh2-dU1j6UsdWmMa5OpVmPtqXl4orYr2_3iAxMOhHZ_vuTeD0KGeAgbeab7_4ijyLeJ-a8UmWPVkglnNb5JmG8To77tSXGcPpBcAFpdI_jftCWr65eL1vmAkPNJgUTgI4sGunzaybf98LSv_w4IEBc3-nY5GfL-mjPRqVCRLUtbhHO_5AYDpqGj6zkKreJ9-KsoQUP6RrAVxkNuOHV9g1G-CHihKsyAifxNN2Q","use": "sig","kty": "RSA","alg": "RS256","kid": "dd125d5f462fbc6014aedab81ddf3bcedab70847","e": "AQAB"}]}"#).unwrap().keys);
+    static TEST_CALLER: Cell<Principal> = Cell::new(Principal::from_slice(&[211, 40, 186, 145, 43, 2, 6, 17, 232, 23, 22, 44, 51, 178, 233, 163, 131, 231, 82, 174, 66, 201, 203, 1, 102, 109, 20, 75, 2]));
+    static TEST_TIME: Cell<u64> = const { Cell::new(secs_to_nanos(1_740_583_712)) };
+    static TEST_CERTS: Cell<Vec<Jwk>> = Cell::new(serde_json::from_str::<Certs>(r#"{"keys":[{"kty":"RSA","n":"0dbaWQrLCbYfGU1ezvZ6eV00s3knn0vxX6gYjwVDVfWcNYlyUh9-jOQdHYfO5DyNW2IjdrRby_zsgusACCrMrz1TvX7N17DEEHiPOJ1n8er8-WZr2kXOGx7V219xEfCU0BT-Xy2n5iAlA-JVlrvpbP3mJEVOgGV4DH7R959ZU3efqCNmGbDXkC2iAoSoltd-6UCWw9B5u1rkm9mH4rL9Jcdbx-_CQpj9s-UUY3PAbtd1E2VIB6MGavYTkX2vKh-F6TwFdAXVE7FrTRzrA8bNRVHW-9gm2D6aUCvxQrrnx-nGTfUFFK-lA6mfUBqZU9TLAJxY6j2Lo88zz0vBF9ZaFw","e":"AQAB","kid":"test-rsa-key","alg":"RS256","use":"sig"}]}"#).unwrap().keys);
 }
 
 #[cfg(not(test))]
@@ -1134,16 +1134,16 @@ fn should_transform_certs_to_same() {
 }
 
 #[cfg(test)]
-const TEST_AUD: &str = "45431994619-cbbfgtn7o0pp0dpfcg2l66bc4rcg7qbu.apps.googleusercontent.com";
+const TEST_AUD: &str = "360587991668-63bpc1gngp1s5gbo1aldal4a50c1j0bb.apps.googleusercontent.com";
 
 #[cfg(test)]
 fn test_data() -> (String, [u8; 32], OpenIdConfig, Claims) {
     // This JWT is for testing purposes, it's already been expired before this commit has been made,
     // additionally the audience of this JWT is a test Google client registration, not production.
-    let jwt = "eyJhbGciOiJSUzI1NiIsImtpZCI6ImRkMTI1ZDVmNDYyZmJjNjAxNGFlZGFiODFkZGYzYmNlZGFiNzA4NDciLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJodHRwczovL2FjY291bnRzLmdvb2dsZS5jb20iLCJhenAiOiI0NTQzMTk5NDYxOS1jYmJmZ3RuN28wcHAwZHBmY2cybDY2YmM0cmNnN3FidS5hcHBzLmdvb2dsZXVzZXJjb250ZW50LmNvbSIsImF1ZCI6IjQ1NDMxOTk0NjE5LWNiYmZndG43bzBwcDBkcGZjZzJsNjZiYzRyY2c3cWJ1LmFwcHMuZ29vZ2xldXNlcmNvbnRlbnQuY29tIiwic3ViIjoiMTE1MTYwNzE2MzM4ODEzMDA2OTAyIiwiaGQiOiJkZmluaXR5Lm9yZyIsImVtYWlsIjoidGhvbWFzLmdsYWRkaW5lc0BkZmluaXR5Lm9yZyIsImVtYWlsX3ZlcmlmaWVkIjp0cnVlLCJub25jZSI6ImV0aURhTEdjUmRtNS1yY3FlMFpRVWVNZ3BmcDR2OVRPT1lVUGJoUng3bkkiLCJuYmYiOjE3MzY3OTM4MDIsIm5hbWUiOiJUaG9tYXMgR2xhZGRpbmVzIiwicGljdHVyZSI6Imh0dHBzOi8vbGgzLmdvb2dsZXVzZXJjb250ZW50LmNvbS9hL0FDZzhvY0lTTWxja0M1RjZxaGlOWnpfREZtWGp5OTY4LXlPaEhPTjR4TGhRdXVNSDNuQlBXQT1zOTYtYyIsImdpdmVuX25hbWUiOiJUaG9tYXMiLCJmYW1pbHlfbmFtZSI6IkdsYWRkaW5lcyIsImlhdCI6MTczNjc5NDEwMiwiZXhwIjoxNzM2Nzk3NzAyLCJqdGkiOiIwMWM1NmYyMGM1MzFkNDhhYjU0ZDMwY2I4ZmRiNzU0MmM0ZjdmNjg4In0.f47b0HNskm-85sT5XtoRzORnfobK2nzVFG8jTH6eS_qAyu0ojNDqVsBtGN4A7HdjDDCOIMSu-R5e413xuGJIWLadKrLwXmguRFo3SzLrXeja-A-rP-axJsb5QUJZx1mwYd1vUNzLB9bQojU3Na6Hdvq09bMtTwaYdCn8Q9v3RErN-5VUxELmSbSXbf10A-IsS7jtzPjxHV6ueq687Ppeww6Q7AGGFB4t9H8qcDbI1unSdugX3-MfMWJLzVHbVxDgfAcLem1c2iAspvv_D5aPLeJF5HLRR2zg-Jil1BFTOoEPAAPFr1MEsvDMWSTt5jLyuMrnS4jiMGudGGPV4DDDww";
+    let jwt = concat!("eyJhbGciOiJSUzI1NiIsImtpZCI6InRlc3QtcnNhLWtleSIsInR5cCI6IkpXVCJ9", ".", "eyJpc3MiOiJodHRwczovL2FjY291bnRzLmdvb2dsZS5jb20iLCJhdWQiOiIzNjA1ODc5OTE2NjgtNjNicGMxZ25ncDFzNWdibzFhbGRhbDRhNTBjMWowYmIuYXBwcy5nb29nbGV1c2VyY29udGVudC5jb20iLCJzdWIiOiJ0ZXN0LWdvb2dsZS1zdWJqZWN0LTEiLCJub25jZSI6ImZCRzFLcjNRa3lnR0d6U0lYb093andEX3lCOFdLQV9xUk9SVmMwWnRYeUkiLCJpYXQiOjE3NDA1ODM3MTIsIm5iZiI6MTc0MDU4MzcxMiwiZXhwIjoxNzQwNTg3MzEyLCJlbWFpbCI6Im9wZW5pZC1nb29nbGUtMUBleGFtcGxlLnRlc3QiLCJlbWFpbF92ZXJpZmllZCI6dHJ1ZSwibmFtZSI6Ik9wZW5JRCBHb29nbGUgT25lIn0", ".", "wiRc3a0oowsvWo5sfSHL-IStohmB0GabTPjb9xgBw6GEdJToGYc2wF7Wr5Vw9tnMqNCPNs4wpwPvImRy5eFBoJY4WqIhVFDjRSXKm0VZmd__OjgpZgpGihtjbX49X30u2U5fVYWVIkAhOxvWSTYD5cH2T8JKtJ_p_K9Ze-DCxtC4rhnQRykR5pcQIuYdUhgqBVbNcBXIwm4_LVxL9V-w2D_xGDYWAjbaqEXx-IcfVr7X2thu5KmEAqfKmW5cYDYafDLjIRImOfof7VpF8V3B0ShJTgFci03YEqJUkBwqGp0rtIamcVnGW4c8o77U5BEkov9-dBYQO1nn_grIudfV2g");
     let salt: [u8; 32] = [
-        143, 79, 158, 224, 218, 125, 157, 169, 98, 43, 205, 227, 243, 123, 173, 255, 132, 83, 81,
-        139, 161, 18, 224, 243, 4, 129, 26, 123, 229, 242, 200, 189,
+        107, 14, 204, 55, 92, 39, 93, 230, 53, 20, 153, 234, 70, 25, 120, 74, 136, 94, 251, 187,
+        238, 96, 97, 180, 255, 135, 20, 149, 143, 27, 159, 83,
     ];
     let validation_item = Decoder::new()
         .decode_compact_serialization(jwt.as_bytes(), None)
@@ -1212,7 +1212,7 @@ fn should_return_error_when_cert_missing() {
     assert_eq!(
         provider.verify(&jwt, &salt),
         Err(OpenIDJWTVerificationError::GenericError(
-            "Certificate not found for dd125d5f462fbc6014aedab81ddf3bcedab70847".into()
+            "Certificate not found for test-rsa-key".into()
         ))
     );
 }
@@ -1224,7 +1224,7 @@ fn should_return_error_when_signature_invalid() {
     let chunks: Vec<&str> = jwt.split('.').collect();
     let header = chunks[0];
     let payload = chunks[1];
-    let invalid_signature = "f47b0sNskm-85sT5XtoRzORnfobK2nzVFF8jTH6eS_qAyu0ojNDqVsBtGN4A7HdjDDCOIMSu-R5e413xuGJIWLadKrLwXmguRFo3SzLrXeja-A-rP-axJsb5QUJZx1mwYd1vUNzLB9bQojU3Na6Hdvq09bMtTwaYdCn8Q9v3RErN-5VUxELmSbSXbf10A-IsS7jtzPjxHV6ueq687Ppeww5Q7AGGFB4t9H8qcDbI1unSdugX3-MfMWJLzVHbVxDgfAcLem1c2iAspvv_D5aPLeJF5HLRR2zg-Jil1BFTOoEPAAPFr1MEsvDMWSTt5jLyuMrnS4jiMGudGGPV4DDDww";
+    let invalid_signature = "xiRc3a0oowsvWo5sfSHL-IStohmB0GabTPjb9xgBw6GEdJToGYc2wF7Wr5Vw9tnMqNCPNs4wpwPvImRy5eFBoJY4WqIhVFDjRSXKm0VZmd__OjgpZgpGihtjbX49X30u2U5fVYWVIkAhOxvWSTYD5cH2T8JKtJ_p_K9Ze-DCxtC4rhnQRykR5pcQIuYdUhgqBVbNcBXIwm4_LVxL9V-w2D_xGDYWAjbaqEXx-IcfVr7X2thu5KmEAqfKmW5cYDYafDLjIRImOfof7VpF8V3B0ShJTgFci03YEqJUkBwqGp0rtIamcVnGW4c8o77U5BEkov9-dBYQO1nn_grIudfV2g";
     let invalid_jwt = [header, payload, invalid_signature].join(".");
 
     assert_eq!(
@@ -1301,7 +1301,7 @@ fn should_return_error_when_invalid_salt() {
     assert_eq!(
         verify_claims(&config.issuer, &config.client_id, &claims, &invalid_salt),
         Err(OpenIDJWTVerificationError::GenericError(
-            "Invalid nonce: etiDaLGcRdm5-rcqe0ZQUeMgpfp4v9TOOYUPbhRx7nI".into()
+            "Invalid nonce: fBG1Kr3QkygGGzSIXoOwjwD_yB8WKA_qRORVc0ZtXyI".into()
         ))
     );
 }
@@ -1317,7 +1317,7 @@ fn should_return_error_when_invalid_caller() {
     assert_eq!(
         verify_claims(&config.issuer, &config.client_id, &claims, &salt),
         Err(OpenIDJWTVerificationError::GenericError(
-            "Invalid nonce: etiDaLGcRdm5-rcqe0ZQUeMgpfp4v9TOOYUPbhRx7nI".into()
+            "Invalid nonce: fBG1Kr3QkygGGzSIXoOwjwD_yB8WKA_qRORVc0ZtXyI".into()
         ))
     );
 }
