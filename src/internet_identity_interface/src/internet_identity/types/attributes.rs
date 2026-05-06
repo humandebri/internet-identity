@@ -115,6 +115,8 @@ impl std::fmt::Display for AttributeScope {
 /// More precisely, end characters are removed such that the return value has at most `max_bytes`
 /// bytes. Some examples:
 /// ```
+/// use internet_identity_interface::internet_identity::types::attributes::ellipsized;
+///
 /// println!("{}", ellipsized("abcdef", 5));   // ab...
 /// println!("{}", ellipsized("abcde", 5));    // abcde
 /// println!("{}", ellipsized("abcd", 5));     // abcd
@@ -2172,9 +2174,7 @@ mod tests {
             match err {
                 PrepareIcrc3AttributeError::ValidationError { problems } => {
                     assert!(
-                        problems
-                            .iter()
-                            .any(|p| p.contains("not related to origin")),
+                        problems.iter().any(|p| p.contains("not related to origin")),
                         "expected 'not related to origin' problem, got {:?}",
                         problems
                     );

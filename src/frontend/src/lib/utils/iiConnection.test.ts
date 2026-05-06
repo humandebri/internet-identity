@@ -48,6 +48,8 @@ const DEFAULT_INIT: InternetIdentityInit = {
   canister_creation_cycles_cost: [],
   captcha_config: [],
   openid_configs: [],
+  native_oidc_clients: [],
+  native_oidc_issuer_origin: [],
   sso_discoverable_domains: [],
   register_rate_limit: [],
   related_origins: [
@@ -69,6 +71,7 @@ vi.mock("$lib/globals", () => ({
   canisterConfig: {
     new_flow_origins: [["https://id.ai"]],
   },
+  getPrimaryOrigin: () => "https://id.ai",
 }));
 
 const mockActor = {
@@ -566,7 +569,7 @@ describe("Connection.login", () => {
       const pinDevice: DeviceData = {
         alias: "mockDevice",
         metadata: [],
-        origin: origin !== undefined ? [origin] : [],
+        origin: ["https://other.example"],
         protection: { protected: null },
         pubkey: new Uint8Array(),
         key_type: { browser_storage_key: null },

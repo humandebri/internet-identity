@@ -1,6 +1,7 @@
 use crate::anchor_management::tentative_device_registration::ValidatedRegistrationId;
 use crate::archive::{ArchiveData, ArchiveState, ArchiveStatusCache};
 use crate::state::flow_states::FlowStates;
+use crate::state::native_authorization::NativeAuthorizationState;
 use crate::state::temp_keys::TempKeys;
 use crate::stats::activity_stats::activity_counter::active_anchor_counter::ActiveAnchorCounter;
 use crate::stats::activity_stats::activity_counter::authn_method_counter::AuthnMethodCounter;
@@ -22,6 +23,7 @@ use std::ops::{Deref, DerefMut};
 use std::time::Duration;
 
 pub mod flow_states;
+pub mod native_authorization;
 mod temp_keys;
 
 /// Default captcha config
@@ -115,6 +117,10 @@ pub struct PersistentState {
     pub new_flow_origins: Option<Vec<String>>,
     // Configurations for OpenID clients
     pub openid_configs: Option<Vec<OpenIdConfig>>,
+    // Configurations for native OIDC clients
+    pub native_oidc_clients: Option<Vec<NativeOidcClientConfig>>,
+    // Trusted issuer origin used by native OIDC discovery and signed tokens
+    pub native_oidc_issuer_origin: Option<String>,
     // Allowlist of domains accepted by `add_discoverable_oidc_config`. `None`
     // falls back to the built-in `is_production`-keyed defaults; `Some(vec)`
     // replaces them entirely.
@@ -147,6 +153,8 @@ impl Default for PersistentState {
             related_origins: None,
             new_flow_origins: None,
             openid_configs: None,
+            native_oidc_clients: None,
+            native_oidc_issuer_origin: None,
             sso_discoverable_domains: None,
             oidc_configs: None,
             analytics_config: None,
@@ -206,6 +214,8 @@ struct State {
     lookup_tentative_device_registration: RefCell<HashMap<ValidatedRegistrationId, AnchorNumber>>,
     // additional usage metrics, NOT persisted across updates (but probably should be in the future)
     usage_metrics: RefCell<UsageMetrics>,
+    // Short-lived native authorization requests. These are not persisted across upgrades.
+    native_authorizations: RefCell<NativeAuthorizationState>,
     // State that is temporarily persisted in stable memory during upgrades using
     // pre- and post-upgrade hooks.
     // This must remain small as it is serialized and deserialized on pre- and post-upgrade.
@@ -417,6 +427,14 @@ pub fn usage_metrics<R>(f: impl FnOnce(&UsageMetrics) -> R) -> R {
 
 pub fn usage_metrics_mut<R>(f: impl FnOnce(&mut UsageMetrics) -> R) -> R {
     STATE.with(|s| f(&mut s.usage_metrics.borrow_mut()))
+}
+
+pub fn native_authorizations<R>(f: impl FnOnce(&NativeAuthorizationState) -> R) -> R {
+    STATE.with(|s| f(&s.native_authorizations.borrow()))
+}
+
+pub fn native_authorizations_mut<R>(f: impl FnOnce(&mut NativeAuthorizationState) -> R) -> R {
+    STATE.with(|s| f(&mut s.native_authorizations.borrow_mut()))
 }
 
 pub fn inflight_challenges<R>(f: impl FnOnce(&HashMap<ChallengeKey, ChallengeInfo>) -> R) -> R {

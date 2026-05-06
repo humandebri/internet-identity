@@ -172,6 +172,103 @@ type GetDelegationResponse = variant {
     no_such_delegation;
 };
 
+type PrepareNativeAuthorizationRequest = record {
+    origin : FrontendHostname;
+    ii_origin : text;
+    session_public_key : SessionKey;
+    redirect_uri : text;
+    client_id : text;
+    state : text;
+    scope : vec text;
+    nonce : text;
+    code_challenge : text;
+    code_challenge_method : text;
+    response_type : text;
+    response_mode : text;
+    max_time_to_live : opt nat64;
+};
+
+type PrepareNativeAuthorizationResponse = record {
+    authorize_url : text;
+    expires_at : Timestamp;
+};
+
+type NativeAuthorizationRequest = record {
+    origin : FrontendHostname;
+    redirect_uri : text;
+    client_id : text;
+    state : text;
+    scope : vec text;
+    nonce : text;
+    session_public_key : SessionKey;
+    max_time_to_live : opt nat64;
+};
+
+type CompleteNativeAuthorizationResponse = record {
+    redirect_url : text;
+};
+
+type RedeemNativeAuthorizationCodeRequest = record {
+    grant_type : text;
+    code : text;
+    redirect_uri : text;
+    code_verifier : text;
+    client_id : text;
+};
+
+type RedeemNativeAuthorizationCodeResponse = record {
+    access_token : text;
+    token_type : text;
+    expires_in : nat64;
+    id_token : text;
+};
+
+type ExchangeNativeAccessTokenForDelegationRequest = record {
+    access_token : text;
+};
+
+type ExchangeNativeAccessTokenForDelegationResponse = record {
+    user_key : UserKey;
+    signed_delegation : SignedDelegation;
+    expiration : Timestamp;
+};
+
+type PrepareNativeAuthorizationError = variant {
+    invalid_origin : text;
+    invalid_redirect_uri : text;
+    invalid_request : text;
+    too_many_requests;
+    internal_canister_error : text;
+};
+
+type GetNativeAuthorizationRequestError = variant {
+    not_found;
+    expired;
+    already_completed;
+};
+
+type CompleteNativeAuthorizationError = variant {
+    unauthorized : principal;
+    not_found;
+    expired;
+    already_completed;
+    internal_canister_error : text;
+};
+
+type RedeemNativeAuthorizationCodeError = variant {
+    invalid_grant : text;
+    invalid_request : text;
+    unsupported_grant_type : text;
+    internal_canister_error : text;
+};
+
+type ExchangeNativeAccessTokenForDelegationError = variant {
+    invalid_token : text;
+    expired;
+    not_found;
+    internal_canister_error : text;
+};
+
 type InternetIdentityStats = record {
     users_registered : nat64;
     storage_layout_version : nat8;
@@ -280,6 +377,10 @@ type InternetIdentityInit = record {
     new_flow_origins : opt vec text;
     // Configurations for OpenID clients
     openid_configs : opt vec OpenIdConfig;
+    // Configurations for native OIDC clients
+    native_oidc_clients : opt vec NativeOidcClientConfig;
+    // Trusted issuer origin used by native OIDC discovery and signed tokens
+    native_oidc_issuer_origin : opt text;
     // Allowlist of domains that may be registered as discoverable SSO
     // providers via `add_discoverable_oidc_config`. When set, fully replaces
     // the built-in defaults. When unset, falls back to `dfinity.org`
@@ -387,6 +488,23 @@ type OpenIdConfig = record {
     auth_scope : vec text;
     fedcm_uri : opt text;
     email_verification : opt OpenIdEmailVerification;
+};
+
+type NativeOidcApplicationType = variant {
+    native;
+};
+
+type NativeOidcTokenEndpointAuthMethod = variant {
+    none;
+};
+
+type NativeOidcClientConfig = record {
+    client_id : text;
+    redirect_uris : vec text;
+    allowed_origins : vec text;
+    application_type : NativeOidcApplicationType;
+    token_endpoint_auth_method : NativeOidcTokenEndpointAuthMethod;
+    require_pkce : bool;
 };
 
 // SSO provider config that uses two-hop discovery.
@@ -1204,7 +1322,24 @@ service : (opt InternetIdentityInit) -> {
     // =======================
     prepare_delegation : (UserNumber, FrontendHostname, SessionKey, maxTimeToLive : opt nat64) -> (UserKey, Timestamp);
     get_delegation : (UserNumber, FrontendHostname, SessionKey, Timestamp) -> (GetDelegationResponse) query;
-
+    prepare_native_authorization : (PrepareNativeAuthorizationRequest) -> (variant { Ok : PrepareNativeAuthorizationResponse; Err : PrepareNativeAuthorizationError });
+    get_native_authorization_request : (request_id : text) -> (variant { Ok : NativeAuthorizationRequest; Err : GetNativeAuthorizationRequestError }) query;
+    complete_native_authorization : (
+        anchor_number : UserNumber,
+        request_id : text,
+        account_number : opt AccountNumber
+    ) -> (variant { Ok : CompleteNativeAuthorizationResponse; Err : CompleteNativeAuthorizationError });
+    redeem_native_authorization_code : (
+        RedeemNativeAuthorizationCodeRequest
+    ) -> (variant { Ok : RedeemNativeAuthorizationCodeResponse; Err : RedeemNativeAuthorizationCodeError });
+    exchange_native_access_token_for_delegation : (
+        ExchangeNativeAccessTokenForDelegationRequest
+    ) -> (
+        variant {
+            Ok : ExchangeNativeAccessTokenForDelegationResponse;
+            Err : ExchangeNativeAccessTokenForDelegationError;
+        }
+    ) query;
     // Attribute sharing protocol
     // ==========================
     prepare_attributes : (PrepareAttributeRequest) -> (variant { Ok : PrepareAttributeResponse; Err : PrepareAttributeError });
@@ -1233,6 +1368,7 @@ service : (opt InternetIdentityInit) -> {
     // HTTP Gateway protocol
     // =====================
     http_request : (request : HttpRequest) -> (HttpResponse) query;
+    http_request_update : (request : HttpRequest) -> (HttpResponse);
 
     // OIDC Discovery
     // ===============

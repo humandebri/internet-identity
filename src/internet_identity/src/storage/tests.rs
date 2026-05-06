@@ -546,6 +546,7 @@ fn sample_persistent_state() -> PersistentState {
                 entries_fetch_limit: 1_000,
             },
         },
+        native_oidc_issuer_origin: Some("https://identity.ic0.app".to_string()),
         canister_creation_cycles_cost: 12_346_000_000,
         active_anchor_stats: ActivityStats {
             completed: CompletedActivityStats {

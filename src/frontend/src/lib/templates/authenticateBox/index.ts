@@ -8,6 +8,7 @@ import {
   InvalidCaller,
   LoginSuccess,
   NoRegistrationFlow,
+  PinUserOtherDomain,
   PossiblyWrongWebAuthnFlow,
   RateLimitExceeded,
   RegisterNoSpace,
@@ -52,6 +53,7 @@ const useIdentityFlow = ({
     | AuthFail
     | WebAuthnFailed
     | PossiblyWrongWebAuthnFlow
+    | PinUserOtherDomain
     | UnknownUser
     | ApiError
   >;
@@ -63,6 +65,7 @@ const useIdentityFlow = ({
   | AuthFail
   | WebAuthnFailed
   | PossiblyWrongWebAuthnFlow
+  | PinUserOtherDomain
   | UnknownUser
   | ApiError
   | { tag: "canceled" }

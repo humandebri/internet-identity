@@ -10,7 +10,7 @@ use ic_stable_structures::storable::Bound;
 use ic_stable_structures::Storable;
 use internet_identity_interface::internet_identity::types::{
     AnalyticsConfig, CaptchaConfig, DiscoverableOidcConfig, DummyAuthConfig, FrontendHostname,
-    OpenIdConfig, RateLimitConfig, Timestamp,
+    NativeOidcClientConfig, OpenIdConfig, RateLimitConfig, Timestamp,
 };
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -36,6 +36,8 @@ pub struct StorablePersistentState {
     related_origins: Option<Vec<String>>,
     new_flow_origins: Option<Vec<String>>,
     openid_configs: Option<Vec<OpenIdConfig>>,
+    native_oidc_clients: Option<Vec<NativeOidcClientConfig>>,
+    native_oidc_issuer_origin: Option<String>,
     oidc_configs: Option<Vec<DiscoverableOidcConfig>>,
     sso_discoverable_domains: Option<Vec<String>>,
     analytics_config: Option<AnalyticsConfig>,
@@ -82,6 +84,8 @@ impl From<PersistentState> for StorablePersistentState {
             related_origins: s.related_origins,
             new_flow_origins: s.new_flow_origins,
             openid_configs: s.openid_configs,
+            native_oidc_clients: s.native_oidc_clients,
+            native_oidc_issuer_origin: s.native_oidc_issuer_origin,
             oidc_configs: s.oidc_configs,
             sso_discoverable_domains: s.sso_discoverable_domains,
             analytics_config: s.analytics_config,
@@ -105,6 +109,8 @@ impl From<StorablePersistentState> for PersistentState {
             related_origins: s.related_origins,
             new_flow_origins: s.new_flow_origins,
             openid_configs: s.openid_configs,
+            native_oidc_clients: s.native_oidc_clients,
+            native_oidc_issuer_origin: s.native_oidc_issuer_origin,
             oidc_configs: s.oidc_configs,
             sso_discoverable_domains: s.sso_discoverable_domains,
             analytics_config: s.analytics_config,
@@ -158,6 +164,8 @@ mod tests {
             related_origins: None,
             new_flow_origins: None,
             openid_configs: None,
+            native_oidc_clients: None,
+            native_oidc_issuer_origin: None,
             oidc_configs: None,
             sso_discoverable_domains: None,
             analytics_config: None,
@@ -185,6 +193,8 @@ mod tests {
             related_origins: None,
             new_flow_origins: None,
             openid_configs: None,
+            native_oidc_clients: None,
+            native_oidc_issuer_origin: None,
             oidc_configs: None,
             sso_discoverable_domains: None,
             event_stats_24h_start: None,

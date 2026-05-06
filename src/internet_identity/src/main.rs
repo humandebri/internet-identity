@@ -54,6 +54,7 @@ mod conversions;
 mod delegation;
 mod http;
 mod ii_domain;
+mod native_authorization;
 
 mod openid;
 mod state;
@@ -170,6 +171,11 @@ fn init_oidc_key_migration_timer() {
 #[update]
 async fn init_salt() {
     state::init_salt().await;
+    native_authorization::prime_signing_key_cache().unwrap_or_else(|err| {
+        trap(&format!(
+            "failed to initialize native OIDC signing key: {err}"
+        ))
+    });
 }
 
 #[update]
@@ -442,6 +448,46 @@ async fn prepare_delegation(
     .unwrap_or_else(|err| trap(&format!("{err:?}")))
 }
 
+#[update]
+async fn prepare_native_authorization(
+    request: PrepareNativeAuthorizationRequest,
+) -> Result<PrepareNativeAuthorizationResponse, PrepareNativeAuthorizationError> {
+    native_authorization::prepare(request).await
+}
+
+#[query]
+fn get_native_authorization_request(
+    request_id: String,
+) -> Result<NativeAuthorizationRequest, GetNativeAuthorizationRequestError> {
+    native_authorization::get_request(&request_id)
+}
+
+#[update]
+async fn complete_native_authorization(
+    anchor_number: AnchorNumber,
+    request_id: String,
+    account_number: Option<AccountNumber>,
+) -> Result<CompleteNativeAuthorizationResponse, CompleteNativeAuthorizationError> {
+    native_authorization::complete(anchor_number, &request_id, account_number).await
+}
+
+#[update]
+async fn redeem_native_authorization_code(
+    request: RedeemNativeAuthorizationCodeRequest,
+) -> Result<RedeemNativeAuthorizationCodeResponse, RedeemNativeAuthorizationCodeError> {
+    native_authorization::redeem_code(request).await
+}
+
+#[query]
+fn exchange_native_access_token_for_delegation(
+    request: ExchangeNativeAccessTokenForDelegationRequest,
+) -> Result<
+    ExchangeNativeAccessTokenForDelegationResponse,
+    ExchangeNativeAccessTokenForDelegationError,
+> {
+    native_authorization::exchange_delegation(request)
+}
+
 #[query]
 fn get_delegation(
     anchor_number: AnchorNumber,
@@ -607,6 +653,11 @@ fn http_request(req: HttpRequest) -> HttpResponse {
     http::http_request(req)
 }
 
+#[update]
+async fn http_request_update(req: HttpRequest) -> HttpResponse {
+    http::http_request_update(req).await
+}
+
 #[query]
 fn stats() -> InternetIdentityStats {
     let archive_info = match state::archive_state() {
@@ -675,6 +726,8 @@ fn config() -> InternetIdentityInit {
         related_origins: persistent_state.related_origins.clone(),
         new_flow_origins: persistent_state.new_flow_origins.clone(),
         openid_configs: persistent_state.openid_configs.clone(),
+        native_oidc_clients: persistent_state.native_oidc_clients.clone(),
+        native_oidc_issuer_origin: persistent_state.native_oidc_issuer_origin.clone(),
         sso_discoverable_domains: persistent_state.sso_discoverable_domains.clone(),
         analytics_config: Some(persistent_state.analytics_config.clone()),
         enable_dapps_explorer: persistent_state.enable_dapps_explorer,
@@ -781,6 +834,20 @@ fn apply_install_arg(maybe_arg: Option<InternetIdentityInit>) {
         if let Some(openid_configs) = arg.openid_configs {
             state::persistent_state_mut(|persistent_state| {
                 persistent_state.openid_configs = Some(openid_configs);
+            })
+        }
+        if let Some(native_oidc_clients) = arg.native_oidc_clients {
+            native_authorization::validate_client_configs(&native_oidc_clients)
+                .unwrap_or_else(|err| trap(&err));
+            state::persistent_state_mut(|persistent_state| {
+                persistent_state.native_oidc_clients = Some(native_oidc_clients);
+            })
+        }
+        if let Some(native_oidc_issuer_origin) = arg.native_oidc_issuer_origin {
+            native_authorization::validate_issuer_origin(&native_oidc_issuer_origin)
+                .unwrap_or_else(|err| trap(&err));
+            state::persistent_state_mut(|persistent_state| {
+                persistent_state.native_oidc_issuer_origin = Some(native_oidc_issuer_origin);
             })
         }
         if let Some(sso_discoverable_domains) = arg.sso_discoverable_domains {

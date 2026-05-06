@@ -13,6 +13,7 @@ mod attributes;
 mod config;
 mod delegation;
 mod http;
+mod native_authorization;
 mod openid;
 mod rollback;
 mod stable_memory;

@@ -8,6 +8,7 @@
   } from "$lib/stores/authorization.store";
   import { lastUsedIdentitiesStore } from "$lib/stores/last-used-identities.store";
   import { authenticationStore } from "$lib/stores/authentication.store";
+  import { anonymousActor } from "$lib/globals";
   import { goto } from "$app/navigation";
   import { toaster } from "$lib/components/utils/toaster";
   import { handleError } from "$lib/components/utils/error";
@@ -15,7 +16,11 @@
   import { t } from "$lib/stores/locale.store";
   import { onMount } from "svelte";
   import { analytics } from "$lib/utils/analytics/analytics";
-  import { throwCanisterError } from "$lib/utils/utils";
+  import {
+    isCanisterError,
+    throwCanisterError,
+    waitForStore,
+  } from "$lib/utils/utils";
   import { AuthLastUsedFlow } from "$lib/flows/authLastUsedFlow.svelte";
   import { AuthWizard } from "$lib/components/wizards/auth";
   import ChannelError from "$lib/components/ui/ChannelError.svelte";
@@ -51,6 +56,9 @@
     if (url.searchParams.get("flow") === "openid-resume") {
       return "openid-resume" as const;
     }
+    if (url.searchParams.has("native_request_id")) {
+      return "native" as const;
+    }
     return "normal" as const;
   })();
 
@@ -73,6 +81,37 @@
       } else {
         channelErrorStore.set("connection-closed");
       }
+    } else if (flow === "native") {
+      const nativeRequestId = new URL(window.location.href).searchParams.get(
+        "native_request_id",
+      );
+      if (nativeRequestId === null) {
+        channelErrorStore.set("invalid-request");
+        return;
+      }
+      anonymousActor
+        .get_native_authorization_request(nativeRequestId)
+        .then(throwCanisterError)
+        .then(({ origin }) => {
+          authorizationStore.setEffectiveOrigin(origin);
+          authorizationStore.setFlow({
+            type: "native",
+            requestId: nativeRequestId,
+          });
+        })
+        .catch((error) => {
+          if (
+            isCanisterError(error) &&
+            (error.type === "expired" ||
+              error.type === "not_found" ||
+              error.type === "already_completed")
+          ) {
+            channelErrorStore.set("invalid-request");
+            return;
+          }
+          console.error(error);
+          channelErrorStore.set("delegation-failed");
+        });
     } else {
       channelStore.establish();
     }
@@ -94,7 +133,7 @@
     if (hasError) {
       return false;
     }
-    if (flow === "normal") {
+    if (flow === "normal" || flow === "native") {
       return $authorizationStore !== undefined;
     }
     // OpenID/SSO 1-click flows gate on channel establishment
@@ -105,7 +144,8 @@
       $authorizedStore === undefined &&
       flow !== "openid-init" &&
       flow !== "sso-init" &&
-      flow !== "openid-resume",
+      flow !== "openid-resume" &&
+      flow !== "native",
   );
 
   // --- Identity switcher state ---
@@ -201,6 +241,34 @@
       handleError(error);
     }
   };
+
+  $effect(() => {
+    if (flow !== "native" || $authorizedStore === undefined) {
+      return;
+    }
+    (async () => {
+      const context = $authorizationContextStore;
+      if (context.flow?.type !== "native") {
+        channelErrorStore.set("invalid-request");
+        return;
+      }
+      const [accountNumber, { identityNumber, actor }] = await Promise.all([
+        $authorizedStore.accountNumberPromise,
+        waitForStore(authenticationStore),
+      ]);
+      const { redirect_url } = await actor
+        .complete_native_authorization(
+          identityNumber,
+          context.flow.requestId,
+          accountNumber !== undefined ? [accountNumber] : [],
+        )
+        .then(throwCanisterError);
+      window.location.assign(redirect_url);
+    })().catch((error) => {
+      console.error(error);
+      channelErrorStore.set("delegation-failed");
+    });
+  });
 
   // Pre-fetch passkey credential ids
   $effect(() =>

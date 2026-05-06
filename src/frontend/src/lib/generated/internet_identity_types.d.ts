@@ -108,7 +108,7 @@ export interface AttributeSpec {
   /**
    * `<attribute_scope>:<attribute_name>` where `<attribute_scope>` is
    * either `openid:<issuer>` or `sso:<domain>`.
-   * 
+   *
    * Examples:
    * - `openid:https://accounts.google.com:email`
    * - `sso:dfinity.org:email`
@@ -125,7 +125,7 @@ export interface AttributeSpec {
    * Certifying unscoped attributes is useful, e.g., when the user wants
    * to share their preferred email without revealing which OpenID
    * provider they use with II.
-   * 
+   *
    * Examples (e.g., `key = "openid:https://accounts.google.com:email"`):
    * 1. If `omit_scope = true`, then the certified attribute key is `email`.
    * 2. Otherwise, the certified attribute key is literally the value of `key`.
@@ -369,6 +369,12 @@ export type CheckCaptchaError = {
      */
     'WrongSolution' : { 'new_captcha_png_base64' : string }
   };
+export type CompleteNativeAuthorizationError = { 'expired' : null } |
+  { 'internal_canister_error' : string } |
+  { 'not_found' : null } |
+  { 'already_completed' : null } |
+  { 'unauthorized' : Principal };
+export interface CompleteNativeAuthorizationResponse { 'redirect_url' : string }
 export type CreateAccountError = { 'AccountLimitReached' : null } |
   { 'InternalCanisterError' : string } |
   { 'Unauthorized' : Principal } |
@@ -402,7 +408,7 @@ export interface DeviceData {
   'alias' : string,
   /**
    * Metadata map for additional device information.
-   * 
+   *
    * Note: some fields above will be moved to the metadata map in the future.
    * All field names of `DeviceData` (such as 'alias', 'origin, etc.) are
    * reserved and cannot be written.
@@ -478,6 +484,18 @@ export interface DummyAuthConfig {
    * this is used in e2e to have multiple dummy auth identities.
    */
   'prompt_for_index' : boolean,
+}
+export type ExchangeNativeAccessTokenForDelegationError = { 'expired' : null } |
+  { 'internal_canister_error' : string } |
+  { 'not_found' : null } |
+  { 'invalid_token' : string };
+export interface ExchangeNativeAccessTokenForDelegationRequest {
+  'access_token' : string,
+}
+export interface ExchangeNativeAccessTokenForDelegationResponse {
+  'user_key' : UserKey,
+  'signed_delegation' : SignedDelegation,
+  'expiration' : Timestamp,
 }
 export type FrontendHostname = string;
 export type GetAccountError = {
@@ -590,6 +608,9 @@ export interface GetIdAliasRequest {
   'relying_party' : FrontendHostname,
   'identity_number' : IdentityNumber,
 }
+export type GetNativeAuthorizationRequestError = { 'expired' : null } |
+  { 'not_found' : null } |
+  { 'already_completed' : null };
 export type HeaderField = [string, string];
 export interface HttpRequest {
   'url' : string,
@@ -604,10 +625,6 @@ export interface HttpResponse {
   'upgrade' : [] | [boolean],
   'status_code' : number,
 }
-/**
- * ICRC-3 attribute sharing types
- * ==============================
- */
 export type Icrc3Value = { 'Int' : bigint } |
   { 'Map' : Array<[string, Icrc3Value]> } |
   { 'Nat' : bigint } |
@@ -778,6 +795,10 @@ export type IdentityPropertiesReplaceError = {
  */
 export interface InternetIdentityInit {
   /**
+   * Trusted issuer origin used by native OIDC discovery and signed tokens
+   */
+  'native_oidc_issuer_origin' : [] | [string],
+  /**
    * Configuration to set the canister as production mode.
    * For now, this is used only to show or hide the banner.
    */
@@ -833,6 +854,10 @@ export interface InternetIdentityInit {
    * Configurations for OpenID clients
    */
   'openid_configs' : [] | [Array<OpenIdConfig>],
+  /**
+   * Configurations for native OIDC clients
+   */
+  'native_oidc_clients' : [] | [Array<NativeOidcClientConfig>],
   /**
    * Backend origin, needed to sync configuration with frontend.
    */
@@ -922,6 +947,26 @@ export type MetadataMapV2 = Array<
       { 'Bytes' : Uint8Array | number[] },
   ]
 >;
+export interface NativeAuthorizationRequest {
+  'redirect_uri' : string,
+  'origin' : FrontendHostname,
+  'scope' : Array<string>,
+  'state' : string,
+  'max_time_to_live' : [] | [bigint],
+  'nonce' : string,
+  'session_public_key' : SessionKey,
+  'client_id' : string,
+}
+export type NativeOidcApplicationType = { 'native' : null };
+export interface NativeOidcClientConfig {
+  'redirect_uris' : Array<string>,
+  'allowed_origins' : Array<string>,
+  'token_endpoint_auth_method' : NativeOidcTokenEndpointAuthMethod,
+  'require_pkce' : boolean,
+  'client_id' : string,
+  'application_type' : NativeOidcApplicationType,
+}
+export type NativeOidcTokenEndpointAuthMethod = { 'none' : null };
 /**
  * Resolved SSO provider state.
  * All fields other than discovery_domain are None until discovery completes.
@@ -1009,7 +1054,7 @@ export interface PrepareAttributeRequest {
    * `<scope>:<attribute_name>`, where `<scope>` is either
    * `openid:<issuer>` (e.g. `openid:https://accounts.google.com:email`)
    * or `sso:<domain>` (e.g. `sso:dfinity.org:email`).
-   * 
+   *
    * Each linked credential is addressable via exactly one scope:
    * credentials obtained through a `DiscoverableOidcConfig` (two-hop SSO
    * discovery) are reachable only via `sso:<domain>`; credentials from
@@ -1105,6 +1150,32 @@ export interface PrepareIdAliasRequest {
    */
   'identity_number' : IdentityNumber,
 }
+export type PrepareNativeAuthorizationError = {
+    'internal_canister_error' : string
+  } |
+  { 'too_many_requests' : null } |
+  { 'invalid_redirect_uri' : string } |
+  { 'invalid_origin' : string } |
+  { 'invalid_request' : string };
+export interface PrepareNativeAuthorizationRequest {
+  'response_mode' : string,
+  'response_type' : string,
+  'redirect_uri' : string,
+  'code_challenge_method' : string,
+  'origin' : FrontendHostname,
+  'scope' : Array<string>,
+  'state' : string,
+  'max_time_to_live' : [] | [bigint],
+  'code_challenge' : string,
+  'nonce' : string,
+  'session_public_key' : SessionKey,
+  'ii_origin' : string,
+  'client_id' : string,
+}
+export interface PrepareNativeAuthorizationResponse {
+  'authorize_url' : string,
+  'expires_at' : Timestamp,
+}
 /**
  * The prepared id alias contains two (still unsigned) credentials in JWT format,
  * certifying the id alias for the issuer resp. the relying party.
@@ -1136,6 +1207,25 @@ export interface RateLimitConfig {
    * Time it takes (in ns) for a rate limiting token to be replenished.
    */
   'time_per_token_ns' : bigint,
+}
+export type RedeemNativeAuthorizationCodeError = {
+    'internal_canister_error' : string
+  } |
+  { 'unsupported_grant_type' : string } |
+  { 'invalid_grant' : string } |
+  { 'invalid_request' : string };
+export interface RedeemNativeAuthorizationCodeRequest {
+  'code_verifier' : string,
+  'grant_type' : string,
+  'redirect_uri' : string,
+  'code' : string,
+  'client_id' : string,
+}
+export interface RedeemNativeAuthorizationCodeResponse {
+  'id_token' : string,
+  'access_token' : string,
+  'expires_in' : bigint,
+  'token_type' : string,
 }
 export type RegisterResponse = {
     /**
@@ -1379,6 +1469,11 @@ export interface _SERVICE {
     { 'Ok' : IdRegNextStepResult } |
       { 'Err' : CheckCaptchaError }
   >,
+  'complete_native_authorization' : ActorMethod<
+    [UserNumber, string, [] | [AccountNumber]],
+    { 'Ok' : CompleteNativeAuthorizationResponse } |
+      { 'Err' : CompleteNativeAuthorizationError }
+  >,
   'config' : ActorMethod<[], InternetIdentityInit>,
   'create_account' : ActorMethod<
     [UserNumber, FrontendHostname, string],
@@ -1397,6 +1492,11 @@ export interface _SERVICE {
    */
   'discovered_oidc_configs' : ActorMethod<[], Array<OidcConfig>>,
   'enter_device_registration_mode' : ActorMethod<[UserNumber], Timestamp>,
+  'exchange_native_access_token_for_delegation' : ActorMethod<
+    [ExchangeNativeAccessTokenForDelegationRequest],
+    { 'Ok' : ExchangeNativeAccessTokenForDelegationResponse } |
+      { 'Err' : ExchangeNativeAccessTokenForDelegationError }
+  >,
   'exit_device_registration_mode' : ActorMethod<[UserNumber], undefined>,
   /**
    * Returns a batch of entries _sorted by sequence number_ to be archived.
@@ -1443,12 +1543,18 @@ export interface _SERVICE {
     { 'Ok' : IdAliasCredentials } |
       { 'Err' : GetIdAliasError }
   >,
+  'get_native_authorization_request' : ActorMethod<
+    [string],
+    { 'Ok' : NativeAuthorizationRequest } |
+      { 'Err' : GetNativeAuthorizationRequestError }
+  >,
   'get_principal' : ActorMethod<[UserNumber, FrontendHostname], Principal>,
   /**
    * HTTP Gateway protocol
    * =====================
    */
   'http_request' : ActorMethod<[HttpRequest], HttpResponse>,
+  'http_request_update' : ActorMethod<[HttpRequest], HttpResponse>,
   /**
    * Returns information about the authentication methods of the identity with the given number.
    * Only returns the minimal information required for authentication without exposing any metadata such as aliases.
@@ -1616,6 +1722,16 @@ export interface _SERVICE {
     { 'Ok' : PreparedIdAlias } |
       { 'Err' : PrepareIdAliasError }
   >,
+  'prepare_native_authorization' : ActorMethod<
+    [PrepareNativeAuthorizationRequest],
+    { 'Ok' : PrepareNativeAuthorizationResponse } |
+      { 'Err' : PrepareNativeAuthorizationError }
+  >,
+  'redeem_native_authorization_code' : ActorMethod<
+    [RedeemNativeAuthorizationCodeRequest],
+    { 'Ok' : RedeemNativeAuthorizationCodeResponse } |
+      { 'Err' : RedeemNativeAuthorizationCodeError }
+  >,
   'register' : ActorMethod<
     [DeviceData, ChallengeResult, [] | [Principal]],
     RegisterResponse
@@ -1631,7 +1747,6 @@ export interface _SERVICE {
       { 'Err' : SetDefaultAccountError }
   >,
   'stats' : ActorMethod<[], InternetIdentityStats>,
-  'whoami' : ActorMethod<[], Principal>,
   'update' : ActorMethod<[UserNumber, DeviceKey, DeviceData], undefined>,
   'update_account' : ActorMethod<
     [UserNumber, FrontendHostname, [] | [AccountNumber], AccountUpdate],
@@ -1642,6 +1757,7 @@ export interface _SERVICE {
     [UserNumber, string],
     VerifyTentativeDeviceResponse
   >,
+  'whoami' : ActorMethod<[], Principal>,
 }
 export declare const idlFactory: IDL.InterfaceFactory;
 export declare const init: (args: { IDL: typeof IDL }) => IDL.Type[];

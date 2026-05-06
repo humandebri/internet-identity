@@ -5,8 +5,10 @@ use crate::v2_api::authn_method_test_helpers::{
     create_identity_with_authn_method, create_identity_with_authn_methods,
     sample_webauthn_authn_method, test_authn_method,
 };
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
 use canister_tests::api::internet_identity::api_v2;
-use canister_tests::api::{http_request, internet_identity as api};
+use canister_tests::api::{http_request, http_request_update, internet_identity as api};
 use canister_tests::flows;
 use canister_tests::framework::*;
 use ic_cdk::api::management_canister::main::CanisterId;
@@ -17,10 +19,13 @@ use internet_identity_interface::internet_identity::types::vc_mvp::PrepareIdAlia
 use internet_identity_interface::internet_identity::types::{
     AuthnMethod, AuthnMethodData, CaptchaConfig, CaptchaTrigger, ChallengeAttempt, DeviceData,
     FrontendHostname, InternetIdentityInit, InternetIdentitySynchronizedConfig, MetadataEntryV2,
-    OpenIdConfig,
+    NativeOidcApplicationType, NativeOidcClientConfig, NativeOidcTokenEndpointAuthMethod,
+    OpenIdConfig, PrepareNativeAuthorizationRequest,
 };
 use pocket_ic::{PocketIc, RejectResponse};
 use serde_bytes::ByteBuf;
+use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -925,6 +930,8 @@ fn ii_canister_serves_decodable_synchronized_config() -> Result<(), RejectRespon
         decoded_config,
         InternetIdentitySynchronizedConfig {
             openid_configs: Some(openid_configs),
+            native_oidc_clients: None,
+            native_oidc_issuer_origin: None,
         }
     );
 
@@ -932,6 +939,454 @@ fn ii_canister_serves_decodable_synchronized_config() -> Result<(), RejectRespon
 
     let result = verify_response_certification(&env, canister_id, request, http_response, 2);
     assert_eq!(result.verification_version, 2);
+
+    Ok(())
+}
+
+#[test]
+fn ii_canister_serves_openid_configuration_and_jwks() -> Result<(), RejectResponse> {
+    let env = env();
+    let mut init_arg = arg_with_wasm_hash(ARCHIVE_WASM.clone()).unwrap();
+    init_arg.native_oidc_issuer_origin = Some("https://identity.ic0.app".to_string());
+    let canister_id = install_ii_canister_with_arg(&env, II_WASM.clone(), Some(init_arg));
+    api::init_salt(&env, canister_id)?;
+
+    let configuration_request = HttpRequest {
+        method: "GET".to_string(),
+        url: "/.well-known/openid-configuration".to_string(),
+        headers: vec![
+            ("host".to_string(), "identity.test".to_string()),
+            ("x-forwarded-proto".to_string(), "https".to_string()),
+        ],
+        body: ByteBuf::new(),
+        certificate_version: Some(2),
+    };
+    let configuration_response = http_request(&env, canister_id, &configuration_request)?;
+    assert_eq!(configuration_response.status_code, 200);
+    assert_cors_header(&configuration_response.headers);
+    let configuration_json: Value =
+        serde_json::from_slice(&configuration_response.body).expect("openid config should parse");
+    assert_eq!(configuration_json["issuer"], "https://identity.ic0.app");
+    assert_eq!(
+        configuration_json["authorization_endpoint"],
+        "https://identity.ic0.app/authorize"
+    );
+    assert_eq!(
+        configuration_json["token_endpoint"],
+        "https://identity.ic0.app/oauth2/token"
+    );
+    assert_eq!(
+        configuration_json["ic_delegation_endpoint"],
+        "https://identity.ic0.app/oauth2/delegation"
+    );
+    assert_eq!(
+        configuration_json["jwks_uri"],
+        "https://identity.ic0.app/oauth2/jwks"
+    );
+    assert_eq!(configuration_json["subject_types_supported"][0], "pairwise");
+    assert!(configuration_json.get("delegation_endpoint").is_none());
+
+    let jwks_request = HttpRequest {
+        method: "GET".to_string(),
+        url: "/oauth2/jwks".to_string(),
+        headers: vec![],
+        body: ByteBuf::new(),
+        certificate_version: Some(2),
+    };
+    let jwks_response = http_request(&env, canister_id, &jwks_request)?;
+    assert_eq!(jwks_response.status_code, 200);
+    assert_cors_header(&jwks_response.headers);
+    let jwks_json: Value = serde_json::from_slice(&jwks_response.body).expect("jwks should parse");
+    let keys = jwks_json["keys"]
+        .as_array()
+        .expect("jwks keys should be an array");
+    assert_eq!(keys.len(), 1);
+    assert_eq!(keys[0]["kty"], "RSA");
+    assert_eq!(keys[0]["alg"], "RS256");
+
+    Ok(())
+}
+
+#[test]
+fn ii_canister_serves_native_oidc_token_and_delegation_http_endpoints() -> Result<(), RejectResponse>
+{
+    let env = env();
+    let verifier = "native-browser-authorization-pkce-verifier-value";
+    let client_id = "com.example.app";
+    let redirect_uri = "https://app.example.com/callback";
+    let mut init_arg = arg_with_wasm_hash(ARCHIVE_WASM.clone()).unwrap();
+    init_arg.native_oidc_issuer_origin = Some("https://identity.ic0.app".to_string());
+    init_arg.native_oidc_clients = Some(vec![NativeOidcClientConfig {
+        client_id: client_id.to_string(),
+        redirect_uris: vec![redirect_uri.to_string()],
+        allowed_origins: vec!["https://app.example.com".to_string()],
+        application_type: NativeOidcApplicationType::Native,
+        token_endpoint_auth_method: NativeOidcTokenEndpointAuthMethod::None,
+        require_pkce: true,
+    }]);
+    let canister_id = install_ii_canister_with_arg(&env, II_WASM.clone(), Some(init_arg));
+    api::init_salt(&env, canister_id)?;
+    let anchor_number = flows::register_anchor(&env, canister_id);
+
+    let prepared = api::prepare_native_authorization(
+        &env,
+        canister_id,
+        &PrepareNativeAuthorizationRequest {
+            origin: "https://app.example.com".to_string(),
+            ii_origin: "https://identity.ic0.app".to_string(),
+            session_public_key: ByteBuf::from(b"native session key".to_vec()),
+            redirect_uri: redirect_uri.to_string(),
+            client_id: client_id.to_string(),
+            state: "state-123".to_string(),
+            scope: vec!["openid".to_string()],
+            nonce: "nonce-123".to_string(),
+            code_challenge: URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes())),
+            code_challenge_method: "S256".to_string(),
+            response_type: "code".to_string(),
+            response_mode: "query".to_string(),
+            max_time_to_live: None,
+        },
+    )?
+    .expect("prepare should succeed");
+    let request_id = {
+        let authorize_url = prepared.authorize_url.clone();
+        let (_, query) = authorize_url
+            .split_once('?')
+            .expect("authorize_url should contain query");
+        query
+            .split('&')
+            .find_map(|pair| {
+                let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+                (key == "native_request_id").then(|| value.to_string())
+            })
+            .expect("authorize_url should include native_request_id")
+    };
+    let completed = api::complete_native_authorization(
+        &env,
+        canister_id,
+        principal_1(),
+        anchor_number,
+        &request_id,
+        None,
+    )?
+    .expect("completion should succeed");
+    let authorization_code = {
+        let (_, query) = completed
+            .redirect_url
+            .split_once('?')
+            .expect("redirect_url should contain query");
+        query
+            .split('&')
+            .find_map(|pair| {
+                let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+                (key == "code").then(|| value.to_string())
+            })
+            .expect("redirect_url should include code")
+    };
+
+    let token_request = HttpRequest {
+        method: "POST".to_string(),
+        url: "/oauth2/token".to_string(),
+        headers: vec![(
+            "Content-Type".to_string(),
+            "application/x-www-form-urlencoded".to_string(),
+        )],
+        body: ByteBuf::from(
+            format!(
+                "grant_type=authorization_code&code={}&redirect_uri={}&code_verifier={}&client_id={}",
+                authorization_code, redirect_uri, verifier, client_id
+            )
+            .into_bytes(),
+        ),
+        certificate_version: None,
+    };
+    let token_response = http_request_update(&env, canister_id, &token_request)?;
+    assert_eq!(token_response.status_code, 200);
+    assert_cors_header(&token_response.headers);
+    assert_no_store_headers(&token_response.headers);
+    let token_json: Value =
+        serde_json::from_slice(&token_response.body).expect("token response should parse");
+    let access_token = token_json["access_token"]
+        .as_str()
+        .expect("access_token should be present");
+    assert_eq!(token_json["token_type"], "Bearer");
+
+    let delegation_preflight_response = http_request(
+        &env,
+        canister_id,
+        &HttpRequest {
+            method: "OPTIONS".to_string(),
+            url: "/oauth2/delegation".to_string(),
+            headers: vec![],
+            body: ByteBuf::new(),
+            certificate_version: None,
+        },
+    )?;
+    assert_eq!(delegation_preflight_response.status_code, 204);
+    assert_cors_header(&delegation_preflight_response.headers);
+    assert_header_value(
+        &delegation_preflight_response.headers,
+        "Access-Control-Allow-Methods",
+        "GET, OPTIONS",
+    );
+    assert_header_value(
+        &delegation_preflight_response.headers,
+        "Access-Control-Allow-Headers",
+        "authorization, content-type",
+    );
+
+    let token_preflight_response = http_request(
+        &env,
+        canister_id,
+        &HttpRequest {
+            method: "OPTIONS".to_string(),
+            url: "/oauth2/token".to_string(),
+            headers: vec![],
+            body: ByteBuf::new(),
+            certificate_version: None,
+        },
+    )?;
+    assert_eq!(token_preflight_response.status_code, 204);
+    assert_cors_header(&token_preflight_response.headers);
+    assert_header_value(
+        &token_preflight_response.headers,
+        "Access-Control-Allow-Methods",
+        "POST, OPTIONS",
+    );
+    assert_header_value(
+        &token_preflight_response.headers,
+        "Access-Control-Allow-Headers",
+        "authorization, content-type",
+    );
+
+    let delegation_response = http_request(
+        &env,
+        canister_id,
+        &HttpRequest {
+            method: "GET".to_string(),
+            url: "/oauth2/delegation".to_string(),
+            headers: vec![(
+                "Authorization".to_string(),
+                format!("bEaReR {access_token}"),
+            )],
+            body: ByteBuf::new(),
+            certificate_version: None,
+        },
+    )?;
+    assert_eq!(delegation_response.status_code, 200);
+    assert_cors_header(&delegation_response.headers);
+    assert_no_store_headers(&delegation_response.headers);
+    let delegation_json: Value = serde_json::from_slice(&delegation_response.body)
+        .expect("delegation response should parse");
+    assert!(delegation_json.get("user_key").is_some());
+    assert!(delegation_json.get("signed_delegation").is_some());
+
+    let repeated_delegation_response = http_request(
+        &env,
+        canister_id,
+        &HttpRequest {
+            method: "GET".to_string(),
+            url: "/oauth2/delegation".to_string(),
+            headers: vec![(
+                "Authorization".to_string(),
+                format!("Bearer {access_token}"),
+            )],
+            body: ByteBuf::new(),
+            certificate_version: None,
+        },
+    )?;
+    assert_eq!(repeated_delegation_response.status_code, 200);
+    assert_no_store_headers(&repeated_delegation_response.headers);
+
+    let query_fallback_response = http_request(
+        &env,
+        canister_id,
+        &HttpRequest {
+            method: "GET".to_string(),
+            url: format!("/oauth2/delegation?access_token={access_token}"),
+            headers: vec![],
+            body: ByteBuf::new(),
+            certificate_version: None,
+        },
+    )?;
+    assert_eq!(query_fallback_response.status_code, 200);
+    assert_no_store_headers(&query_fallback_response.headers);
+
+    let header_precedence_response = http_request(
+        &env,
+        canister_id,
+        &HttpRequest {
+            method: "GET".to_string(),
+            url: "/oauth2/delegation?access_token=wrong-token".to_string(),
+            headers: vec![(
+                "Authorization".to_string(),
+                format!("Bearer {access_token}"),
+            )],
+            body: ByteBuf::new(),
+            certificate_version: None,
+        },
+    )?;
+    assert_eq!(header_precedence_response.status_code, 200);
+    assert_no_store_headers(&header_precedence_response.headers);
+
+    let token_error_response = http_request_update(
+        &env,
+        canister_id,
+        &HttpRequest {
+            method: "POST".to_string(),
+            url: "/oauth2/token".to_string(),
+            headers: vec![(
+                "Content-Type".to_string(),
+                "application/x-www-form-urlencoded".to_string(),
+            )],
+            body: ByteBuf::from(
+                format!(
+                    "grant_type=authorization_code&code={}&redirect_uri={}&client_id={}",
+                    request_id, redirect_uri, client_id
+                )
+                .into_bytes(),
+            ),
+            certificate_version: None,
+        },
+    )?;
+    assert_eq!(token_error_response.status_code, 400);
+    assert_no_store_headers(&token_error_response.headers);
+
+    let duplicate_token_field_response = http_request_update(
+        &env,
+        canister_id,
+        &HttpRequest {
+            method: "POST".to_string(),
+            url: "/oauth2/token".to_string(),
+            headers: vec![(
+                "Content-Type".to_string(),
+                "application/x-www-form-urlencoded".to_string(),
+            )],
+            body: ByteBuf::from(
+                format!(
+                    "grant_type=authorization_code&code={}&code=other&redirect_uri={}&code_verifier={}&client_id={}",
+                    authorization_code, redirect_uri, verifier, client_id
+                )
+                .into_bytes(),
+            ),
+            certificate_version: None,
+        },
+    )?;
+    assert_eq!(duplicate_token_field_response.status_code, 400);
+    let duplicate_token_json: Value = serde_json::from_slice(&duplicate_token_field_response.body)
+        .expect("duplicate token error should parse");
+    assert_eq!(duplicate_token_json["error"], "invalid_request");
+
+    let delegation_error_response = http_request(
+        &env,
+        canister_id,
+        &HttpRequest {
+            method: "GET".to_string(),
+            url: "/oauth2/delegation?access_token=missing-token".to_string(),
+            headers: vec![],
+            body: ByteBuf::new(),
+            certificate_version: None,
+        },
+    )?;
+    assert_eq!(delegation_error_response.status_code, 401);
+    assert_no_store_headers(&delegation_error_response.headers);
+    assert_header_value(
+        &delegation_error_response.headers,
+        "WWW-Authenticate",
+        "Bearer",
+    );
+    let delegation_error_json: Value = serde_json::from_slice(&delegation_error_response.body)
+        .expect("delegation error should parse");
+    assert_eq!(delegation_error_json["error"], "invalid_token");
+
+    env.advance_time(Duration::from_secs(5 * 60 + 1));
+    env.tick();
+    let expired_delegation_response = http_request(
+        &env,
+        canister_id,
+        &HttpRequest {
+            method: "GET".to_string(),
+            url: "/oauth2/delegation".to_string(),
+            headers: vec![(
+                "Authorization".to_string(),
+                format!("Bearer {access_token}"),
+            )],
+            body: ByteBuf::new(),
+            certificate_version: None,
+        },
+    )?;
+    assert_eq!(expired_delegation_response.status_code, 401);
+    assert_header_value(
+        &expired_delegation_response.headers,
+        "WWW-Authenticate",
+        "Bearer",
+    );
+    let expired_delegation_json: Value = serde_json::from_slice(&expired_delegation_response.body)
+        .expect("expired delegation error should parse");
+    assert_eq!(expired_delegation_json["error"], "invalid_token");
+
+    let delegation_missing_token_response = http_request(
+        &env,
+        canister_id,
+        &HttpRequest {
+            method: "GET".to_string(),
+            url: "/oauth2/delegation".to_string(),
+            headers: vec![],
+            body: ByteBuf::new(),
+            certificate_version: None,
+        },
+    )?;
+    assert_eq!(delegation_missing_token_response.status_code, 400);
+    assert_no_store_headers(&delegation_missing_token_response.headers);
+    let delegation_missing_token_json: Value =
+        serde_json::from_slice(&delegation_missing_token_response.body)
+            .expect("missing delegation token error should parse");
+    assert_eq!(delegation_missing_token_json["error"], "invalid_request");
+
+    let duplicate_query_token_response = http_request(
+        &env,
+        canister_id,
+        &HttpRequest {
+            method: "GET".to_string(),
+            url: "/oauth2/delegation?access_token=one&access_token=two".to_string(),
+            headers: vec![],
+            body: ByteBuf::new(),
+            certificate_version: None,
+        },
+    )?;
+    assert_eq!(duplicate_query_token_response.status_code, 400);
+    let duplicate_query_token_json: Value =
+        serde_json::from_slice(&duplicate_query_token_response.body)
+            .expect("duplicate delegation token error should parse");
+    assert_eq!(duplicate_query_token_json["error"], "invalid_request");
+
+    let token_method_response = http_request(
+        &env,
+        canister_id,
+        &HttpRequest {
+            method: "GET".to_string(),
+            url: "/oauth2/token".to_string(),
+            headers: vec![],
+            body: ByteBuf::new(),
+            certificate_version: None,
+        },
+    )?;
+    assert_eq!(token_method_response.status_code, 405);
+    assert_header_value(&token_method_response.headers, "Allow", "POST, OPTIONS");
+
+    let delegation_method_response = http_request_update(
+        &env,
+        canister_id,
+        &HttpRequest {
+            method: "POST".to_string(),
+            url: "/oauth2/delegation".to_string(),
+            headers: vec![],
+            body: ByteBuf::new(),
+            certificate_version: None,
+        },
+    )?;
+    assert_eq!(delegation_method_response.status_code, 405);
+    assert_header_value(&delegation_method_response.headers, "Allow", "GET, OPTIONS");
 
     Ok(())
 }
@@ -955,4 +1410,25 @@ fn verify_response_certification(
         min_certification_version as u8,
     )
     .unwrap_or_else(|e| panic!("validation failed: {e}"))
+}
+
+fn assert_cors_header(headers: &[(String, String)]) {
+    let (_, value) = headers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("access-control-allow-origin"))
+        .expect("Access-Control-Allow-Origin header not found");
+    assert_eq!(value, "*");
+}
+
+fn assert_no_store_headers(headers: &[(String, String)]) {
+    assert_header_value(headers, "Cache-Control", "no-store, no-cache, max-age=0");
+    assert_header_value(headers, "Pragma", "no-cache");
+}
+
+fn assert_header_value(headers: &[(String, String)], name: &str, expected: &str) {
+    let (_, value) = headers
+        .iter()
+        .find(|(header_name, _)| header_name.eq_ignore_ascii_case(name))
+        .unwrap_or_else(|| panic!("{name} header not found"));
+    assert_eq!(value, expected);
 }

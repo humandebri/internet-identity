@@ -187,12 +187,12 @@ fn should_get_certified_attributes() {
             certified_attributes: vec![
                 CertifiedAttribute {
                     key: "openid:https://accounts.google.com:email".into(),
-                    value: b"andri.schatz@dfinity.org".to_vec(),
+                    value: b"openid-google-1@example.test".to_vec(),
                     signature: vec![], // redacted
                 },
                 CertifiedAttribute {
                     key: "openid:https://accounts.google.com:name".into(),
-                    value: b"Andri Schatz".to_vec(),
+                    value: b"OpenID Google One".to_vec(),
                     signature: vec![], // redacted
                 },
             ],
@@ -484,7 +484,7 @@ fn should_get_certified_attributes_microsoft() {
         CertifiedAttributes {
             certified_attributes: vec![CertifiedAttribute {
                 key: format!("openid:{microsoft_template_issuer}:name"),
-                value: "Llorenç Muntaner Perello".as_bytes().to_vec(),
+                value: b"OpenID Microsoft One".to_vec(),
                 signature: vec![], // redacted
             }],
             expires_at_timestamp_ns: prepare_response.issued_at_timestamp_ns
@@ -603,12 +603,12 @@ fn should_get_icrc3_certified_attributes() {
         attributes: vec![
             AttributeSpec {
                 key: "openid:https://accounts.google.com:email".into(),
-                value: Some(b"andri.schatz@dfinity.org".to_vec()),
+                value: Some(b"openid-google-1@example.test".to_vec()),
                 omit_scope: false,
             },
             AttributeSpec {
                 key: "openid:https://accounts.google.com:name".into(),
-                value: Some(b"Andri Schatz".to_vec()),
+                value: Some(b"OpenID Google One".to_vec()),
                 omit_scope: false,
             },
         ],

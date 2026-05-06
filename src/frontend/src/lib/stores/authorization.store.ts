@@ -3,6 +3,7 @@ import { derived, type Readable, writable } from "svelte/store";
 export type AuthorizationFlow =
   | { type: "1-click-openid"; issuer: string }
   | { type: "1-click-sso"; domain: string }
+  | { type: "native"; requestId: string }
   | { type: "regular" };
 
 export type AuthorizationContext = {

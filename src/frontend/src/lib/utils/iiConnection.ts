@@ -383,6 +383,7 @@ export class Connection {
     | AuthFail
     | WebAuthnFailed
     | PossiblyWrongWebAuthnFlow
+    | PinUserOtherDomain
     | UnknownUser
     | ApiError
   > => {
@@ -404,6 +405,10 @@ export class Connection {
     let webAuthnAuthenticators = devices.filter(
       ({ key_type }) => !("browser_storage_key" in key_type),
     );
+
+    if (webAuthnAuthenticators.length === 0) {
+      return { kind: "pinUserOtherDomain" };
+    }
 
     if (get(HARDWARE_KEY_TEST)) {
       webAuthnAuthenticators = webAuthnAuthenticators.filter(

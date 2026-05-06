@@ -259,6 +259,9 @@
       // resumeOpenId sets the flow once the JWT (and thus the issuer)
       // has been decoded.
       resumeOpenId().catch(handleError);
+    } else if (data.flow === "native") {
+      // The layout fetches the native authorization request and owns the
+      // native flow state. Setting `regular` here would break completion.
     } else {
       authorizationStore.setFlow({ type: "regular" });
     }

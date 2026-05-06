@@ -148,6 +148,137 @@ pub enum GetDelegationResponse {
     NoSuchDelegation,
 }
 
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub struct PrepareNativeAuthorizationRequest {
+    pub origin: FrontendHostname,
+    pub ii_origin: String,
+    pub session_public_key: SessionKey,
+    pub redirect_uri: String,
+    pub client_id: String,
+    pub state: String,
+    pub scope: Vec<String>,
+    pub nonce: String,
+    pub code_challenge: String,
+    pub code_challenge_method: String,
+    pub response_type: String,
+    pub response_mode: String,
+    pub max_time_to_live: Option<u64>,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub struct PrepareNativeAuthorizationResponse {
+    pub authorize_url: String,
+    pub expires_at: Timestamp,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub struct NativeAuthorizationRequest {
+    pub origin: FrontendHostname,
+    pub redirect_uri: String,
+    pub client_id: String,
+    pub state: String,
+    pub scope: Vec<String>,
+    pub nonce: String,
+    pub session_public_key: SessionKey,
+    pub max_time_to_live: Option<u64>,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub struct CompleteNativeAuthorizationResponse {
+    pub redirect_url: String,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub struct RedeemNativeAuthorizationCodeRequest {
+    pub grant_type: String,
+    pub code: String,
+    pub redirect_uri: String,
+    pub code_verifier: String,
+    pub client_id: String,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub struct RedeemNativeAuthorizationCodeResponse {
+    pub access_token: String,
+    pub token_type: String,
+    pub expires_in: u64,
+    pub id_token: String,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub struct ExchangeNativeAccessTokenForDelegationRequest {
+    pub access_token: String,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub struct ExchangeNativeAccessTokenForDelegationResponse {
+    pub user_key: UserKey,
+    pub signed_delegation: SignedDelegation,
+    pub expiration: Timestamp,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub enum PrepareNativeAuthorizationError {
+    #[serde(rename = "invalid_origin")]
+    InvalidOrigin(String),
+    #[serde(rename = "invalid_redirect_uri")]
+    InvalidRedirectUri(String),
+    #[serde(rename = "invalid_request")]
+    InvalidRequest(String),
+    #[serde(rename = "too_many_requests")]
+    TooManyRequests,
+    #[serde(rename = "internal_canister_error")]
+    InternalCanisterError(String),
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub enum GetNativeAuthorizationRequestError {
+    #[serde(rename = "not_found")]
+    NotFound,
+    #[serde(rename = "expired")]
+    Expired,
+    #[serde(rename = "already_completed")]
+    AlreadyCompleted,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub enum CompleteNativeAuthorizationError {
+    #[serde(rename = "unauthorized")]
+    Unauthorized(Principal),
+    #[serde(rename = "not_found")]
+    NotFound,
+    #[serde(rename = "expired")]
+    Expired,
+    #[serde(rename = "already_completed")]
+    AlreadyCompleted,
+    #[serde(rename = "internal_canister_error")]
+    InternalCanisterError(String),
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub enum RedeemNativeAuthorizationCodeError {
+    #[serde(rename = "invalid_grant")]
+    InvalidGrant(String),
+    #[serde(rename = "invalid_request")]
+    InvalidRequest(String),
+    #[serde(rename = "unsupported_grant_type")]
+    UnsupportedGrantType(String),
+    #[serde(rename = "internal_canister_error")]
+    InternalCanisterError(String),
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub enum ExchangeNativeAccessTokenForDelegationError {
+    #[serde(rename = "invalid_token")]
+    InvalidToken(String),
+    #[serde(rename = "expired")]
+    Expired,
+    #[serde(rename = "not_found")]
+    NotFound,
+    #[serde(rename = "internal_canister_error")]
+    InternalCanisterError(String),
+}
+
 #[derive(Clone, Debug, CandidType, Deserialize, PartialEq)]
 pub enum AddTentativeDeviceResponse {
     #[serde(rename = "added_tentatively")]
@@ -237,6 +368,18 @@ pub struct InternetIdentityFrontendArgs {
 #[derive(Clone, Debug, CandidType, Deserialize, Default, Eq, PartialEq)]
 pub struct InternetIdentitySynchronizedConfig {
     pub openid_configs: Option<Vec<OpenIdConfig>>,
+    pub native_oidc_clients: Option<Vec<NativeOidcClientConfig>>,
+    pub native_oidc_issuer_origin: Option<String>,
+}
+
+impl From<&InternetIdentityInit> for InternetIdentitySynchronizedConfig {
+    fn from(value: &InternetIdentityInit) -> Self {
+        Self {
+            openid_configs: value.openid_configs.clone(),
+            native_oidc_clients: value.native_oidc_clients.clone(),
+            native_oidc_issuer_origin: value.native_oidc_issuer_origin.clone(),
+        }
+    }
 }
 
 /// Init arguments of II which can be supplied on install and upgrade.
@@ -256,6 +399,8 @@ pub struct InternetIdentityInit {
     pub related_origins: Option<Vec<String>>,
     pub new_flow_origins: Option<Vec<String>>,
     pub openid_configs: Option<Vec<OpenIdConfig>>,
+    pub native_oidc_clients: Option<Vec<NativeOidcClientConfig>>,
+    pub native_oidc_issuer_origin: Option<String>,
     /// Allowlist of domains that may be registered as discoverable SSO
     /// providers via `add_discoverable_oidc_config`. When `Some`, this list
     /// fully replaces the built-in defaults; when `None`, falls back to
@@ -376,6 +521,28 @@ pub struct OpenIdConfig {
     pub auth_scope: Vec<String>,
     pub fedcm_uri: Option<String>,
     pub email_verification: Option<OpenIdEmailVerificationScheme>,
+}
+
+#[derive(Clone, Copy, Debug, CandidType, Serialize, Deserialize, Eq, PartialEq)]
+pub enum NativeOidcApplicationType {
+    #[serde(rename = "native")]
+    Native,
+}
+
+#[derive(Clone, Copy, Debug, CandidType, Serialize, Deserialize, Eq, PartialEq)]
+pub enum NativeOidcTokenEndpointAuthMethod {
+    #[serde(rename = "none")]
+    None,
+}
+
+#[derive(Clone, Debug, CandidType, Serialize, Deserialize, Eq, PartialEq)]
+pub struct NativeOidcClientConfig {
+    pub client_id: String,
+    pub redirect_uris: Vec<String>,
+    pub allowed_origins: Vec<String>,
+    pub application_type: NativeOidcApplicationType,
+    pub token_endpoint_auth_method: NativeOidcTokenEndpointAuthMethod,
+    pub require_pkce: bool,
 }
 
 /// SSO provider configuration that uses two-hop discovery.
